@@ -8,11 +8,10 @@ urlpatterns = [
  path('auth/forget-password/',views.ForgetPasswordApiView.as_view(), name='forget_password'),
  path('auth/verify-email/',views.VerifyEmailApiView.as_view(),name='verify_email'),
  path('auth/is-authenticated/',views.isUserAuthenticated,name='is_authenticated'),
- path('auth/create-student-or-teacher/',views.create_student_or_teacher_account,name='create_student_or_teacher_account'),
+ path('auth/create-student-or-teacher/', views.create_student_or_teacher_account,name='create_student_or_teacher_account'),
  
  #Get user category
- path('subject-categories/',views.get_categories, name='categories'),
- path('user-categories/',views.get_user_category, name='user_categories'),
+ path('categories/',views.CategoryAPI.as_view(), name='categories'),
  
  #Bases
  path('get-quizzes/',views.get_quizzes, name='get_quizzes'),
@@ -37,6 +36,8 @@ urlpatterns = [
  
  
  #Authentication Required Route
- path('user/',views.UserApiView.as_view(),name='user')
+ path('user/',views.UserApiView.as_view(),name='user'),
+ path('tutor/', views.TutorAccountAPI.as_view(), name='tutor_account'),
+ path('student/', views.StudentAccountAPI.as_view(), name='student_account' )
 ]
 

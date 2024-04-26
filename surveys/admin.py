@@ -1,6 +1,6 @@
 from django.contrib import admin
 
-from .models import Surveys, SurveyBlockType, SurveySettings, ShortText, LongText, Choices, Website, WelcomeScreen, Rating, RedirectWithUrl, Email, EndScreen, PhoneNumbers, PictureChoice, PictureChoiceImages, Number, YesNo, Date, ChoicesOptions, DropDown, EndScreenSocialMedia, SurveyDesign, LastUsedBlocks, SurveyLogic
+from .models import Surveys, SurveyBlockType, SurveySettings, ShortText, LongText, Choices, Website, WelcomeScreen, Rating, RedirectWithUrl, Email, EndScreen, PhoneNumbers, PictureChoice, PictureChoiceImages, Number, YesNo, Date, ChoicesOptions, DropDown, EndScreenSocialMedia, SurveyDesign, LastUsedBlocks, SurveyLogic, SurveyParticipant
 
 
 admin.site.register(Surveys)
@@ -27,5 +27,6 @@ admin.site.register(EndScreenSocialMedia)
 admin.site.register(SurveyDesign)
 admin.site.register(LastUsedBlocks)
 admin.site.register(SurveyLogic)
+admin.site.register(SurveyParticipant)
 
 # Register your models here.

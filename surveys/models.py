@@ -24,7 +24,7 @@ class EndScreenSocialMedia(models.Model):
     
     def clean(self):
         check_social_media = EndScreenSocialMedia.objects.filter(
-        end_screen__id=self.end_screen_id, media_type=self.media_type
+        end_screen__id=self.end_screen.id, media_type=self.media_type
         )
 
         if check_social_media.exists() and check_social_media.get().pk != self.pk:
@@ -222,7 +222,7 @@ class ChoicesOptions(models.Model):
     updated_at = models.DateTimeField(auto_now=True)
 
 class SurveyParticipant(models.Model):
-    user_id = models.UUIDField(default=uuid4)
+    user_id = models.UUIDField(default=uuid4, primary_key=True)
     survey = models.ForeignKey(Surveys, on_delete=models.CASCADE, null=True)
     survey_is_completed = models.BooleanField(default=False)
     
@@ -231,8 +231,8 @@ class SurveyParticipant(models.Model):
     # Validation here!
     pass
 
-
 class UserReponse(models.Model):
+    id = models.UUIDField(default=uuid4, primary_key=True)
     user = models.ForeignKey(SurveyParticipant, on_delete=models.CASCADE, null=True)
     response = models.JSONField(default=list)
     block = models.ForeignKey('SurveyBlockType', on_delete=models.CASCADE, null=True)
@@ -386,18 +386,19 @@ class SurveyBlockType(models.Model):
     def __str__(self):
         return self.survey.name + ' ' + self.block_type
     
-    # def correct_all_index(self):
-    #     all_blocks_gt_current_index = SurveyBlockType.objects.filter(
-    #       Q(survey__id=self.survey.id) & Q(index__gt=self.index) 
-    #     )
-    #     # print(all_blocks_gt_current_index)
-    #     for i in all_blocks_gt_current_index:
-    #         all_blocks_gt_current_index[i].index += 1
-    #         all_blocks_gt_current_index[i].save()
+    def correct_all_index(self):
+        all_blocks_gt_current_index = SurveyBlockType.objects.filter(
+          Q(survey__id=self.survey.id) & Q(index__gt=self.index) 
+        )
+        
+        for _ in all_blocks_gt_current_index:
+            block = all_blocks_gt_current_index.first()
+            block.index += 1
+            block.save()
             
-    # def save(self, *arg, **kwarg):
-    #     self.correct_all_index()
-    #     super().save(*arg, **kwarg)
+    def save(self, *arg, **kwarg):
+        self.correct_all_index()
+        super().save(*arg, **kwarg)
 
 class LastUsedBlocks(models.Model):
     id = models.UUIDField(default=uuid4, primary_key=True)
@@ -410,7 +411,6 @@ class LastUsedBlocks(models.Model):
     
     def __str__(self):
         return self.block_type
-
 
 class SurveyLogic(models.Model):
     class Operator(models.TextChoices):

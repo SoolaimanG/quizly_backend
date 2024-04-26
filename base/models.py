@@ -8,6 +8,7 @@ from django.contrib.auth.models import AbstractUser, UserManager
 from django.utils.translation import gettext as _
 from django.db.models import Q
 from django.core.exceptions import ValidationError
+from django.core.validators import EmailValidator
 
 
 from .helpers import upload_to, send_email
@@ -53,11 +54,44 @@ class User(AbstractUser):
  email_verified = models.BooleanField(default=False)
  signup_complete = models.BooleanField(default=False)
  
- 
+#  Check if the email has been tempered with.
+ def check_email_status(self):
+     user: User = User.objects.get(id=self.id)
+     same_email = self.email == user.email
+     if not same_email:
+         self.email_verified = False
  objects = UserManager()
  
  def can_post_quiz(self):
      return bool(self.account_type == 'T')
+ 
+ def signup_is_complete(self):
+     is_signup_complete = all([self.first_name, self.last_name, self.age, self.email_verified])
+     self.signup_complete = is_signup_complete
+ 
+ def validate_email(self):
+     try:
+        validator = EmailValidator(message='Please use a valid email address. Thank you')
+        validator(self.email)
+     except Exception as e:
+        raise ValidationError(str(e))
+    
+ def make_sure_user_has_single_account(self):
+     if self.account_type == self.AccountType.STUDENT:
+        tutor = TeachersAccount.objects.filter(user__id=self.id).first()
+        if tutor: tutor.delete()
+     
+     if self.account_type == self.AccountType.TEACHER:
+        student = StudentAccount.objects.filter(user__id=self.id).first()
+        if student: student.delete()
+ 
+ def save(self, *arg, **kwarg):
+     self.validate_email()
+     self.check_email_status()
+     self.signup_is_complete()
+     self.make_sure_user_has_single_account()
+     super().save(*arg, **kwarg)
+     
  
  def __str__(self) -> str:
     return self.username

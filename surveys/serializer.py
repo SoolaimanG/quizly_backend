@@ -1,6 +1,6 @@
 from rest_framework.serializers import Serializer, ModelSerializer, SerializerMethodField
 
-from .models import Surveys, UserReponse, SurveyBlockType, EndScreenSocialMedia, EndScreen, PhoneNumbers, PictureChoice, Date, Number, ShortText, LongText, DropDown, Rating, RedirectWithUrl, Website, WelcomeScreen, Choices, Email, YesNo, ChoicesOptions, DropDownOpions, PictureChoiceImages, SurveyDesign, SurveySettings, LastUsedBlocks, SurveyLogic
+from .models import Surveys, SurveyParticipant, SurveyBlockType, EndScreenSocialMedia, EndScreen, PhoneNumbers, PictureChoice, Date, Number, ShortText, LongText, DropDown, Rating, RedirectWithUrl, Website, WelcomeScreen, Choices, Email, YesNo, ChoicesOptions, DropDownOpions, PictureChoiceImages, SurveyDesign, SurveySettings, LastUsedBlocks, SurveyLogic, UserReponse
 
 class SurveySettingsSerializer(ModelSerializer):
     class Meta:
@@ -40,7 +40,8 @@ class SurveySerializer(ModelSerializer):
         model = Surveys
         
     def get_response_count(sef, obj:Surveys):
-        return UserReponse.objects.filter(block__survey__id=obj.id).count()
+        participants = SurveyParticipant.objects.filter(survey__id=obj.id, survey_is_completed=True).count()
+        return participants
     
 class SurveyBlockSerializer(ModelSerializer):
     
@@ -58,7 +59,6 @@ class SurveyBlockSerializer(ModelSerializer):
         if obj.block_type == obj.BlockType.EndScreen:
             existing_data = EndScreenSerializer(obj.end_screen).data
             social_media = EndScreenSocialMedia.objects.filter(end_screen__id=obj.end_screen.id).all()
-            print(social_media)
             social_media_data = EndScreenSocialMediaSerializer(social_media, many=True).data
             
             return {**existing_data, 'social_media': social_media_data}

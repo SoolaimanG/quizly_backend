@@ -7,6 +7,10 @@ load_dotenv()
 import os
 
 def image_uploader(image) -> str:
+    print('Escape')
+    if not image:
+        return None
+    
     # Assuming ImageSerializer is a serializer for your UploadImage model
     image_serializer = ImageSerializer(data={"image": image})
 

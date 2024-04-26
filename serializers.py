@@ -38,11 +38,13 @@ class CategorySerializer(serializers.ModelSerializer):
     fields = ['body']
  
 class TeachersAccountSerializer(serializers.ModelSerializer):
+    specializations = CategorySerializer(read_only=True, many=True)
     class Meta:
         model = TeachersAccount
         fields = '__all__'
 
 class StudentAccountSerializer(serializers.ModelSerializer):
+  favourites = CategorySerializer(read_only=True, many=True)
   class Meta:
     model = StudentAccount
     fields = '__all__'

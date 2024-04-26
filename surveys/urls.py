@@ -13,5 +13,6 @@ urlpatterns =[
     path('edit-survey-settings/<str:survey_id>/', views.edit_survey_settings),
     path('used-block/<str:survey_id>/', views.LastUsedBlocksAPI.as_view()),
     path('survey-logics/<str:survey_id>/', views.SurveyLogicApi.as_view()),
-    path('survey-response/<str:survey_id>/', views.SurveyResponses.as_view())
+    path('survey-response/<str:survey_id>/', views.SurveyResponses.as_view()),
+    path('publish-survey/<str:survey_id>/', views.toggle_survey_status)
 ]

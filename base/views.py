@@ -19,9 +19,9 @@ from django.contrib.auth import password_validation
 from django.contrib.auth.hashers import make_password
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.status import HTTP_200_OK, HTTP_404_NOT_FOUND, HTTP_500_INTERNAL_SERVER_ERROR,HTTP_400_BAD_REQUEST, HTTP_429_TOO_MANY_REQUESTS,HTTP_409_CONFLICT, HTTP_401_UNAUTHORIZED
-from .helpers import generate_otp,send_email, generate_random_email,generate_random_password, mark_quiz, get_next_question, get_trending_quiz, has_started_quiz, check_access_token, evaluate_user_answer, check_quiz_type, give_user_feedback, create_result_response_data, mark_as_completed, notification_helper
+from .helpers import generate_otp,send_email, generate_random_email,generate_random_password, mark_quiz, get_next_question, get_trending_quiz, has_started_quiz, check_access_token, evaluate_user_answer, check_quiz_type, give_user_feedback, create_result_response_data, notification_helper
 from emails import otp_message, verify_email_address
-from serializers import UserSerializer,CategorySerializer, QuizSerializer, QuestionSerializer, CommentsSerializer, UUIDListSerializer, ResultSerializer, RelatedQuizSerializer, RelatedQuizSerializerForTutor, NotificationSerializer
+from serializers import UserSerializer, CategorySerializer, QuizSerializer, QuestionSerializer, CommentsSerializer, UUIDListSerializer, ResultSerializer, RelatedQuizSerializer, RelatedQuizSerializerForTutor, NotificationSerializer, TeachersAccountSerializer, StudentAccountSerializer
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
 from django.core.exceptions import ObjectDoesNotExist
@@ -30,6 +30,10 @@ from django.db.models import Q
 from ipware import get_client_ip
 from django.db import transaction
 
+from helpers import image_uploader
+
+
+from permissions import IsPostAuthenticatedOnly
 
 @api_view(['POST'])
 def login_or_signup(request):
@@ -42,6 +46,7 @@ def login_or_signup(request):
         
         username = username.strip().lower() #Change username to lowercase and remove whitespace
         
+
         #If the user is logging in with Oauth this should extend the data to be received for the client
         
         #--->this parameters below are optional<---
@@ -53,16 +58,16 @@ def login_or_signup(request):
         email = email.strip()
         
         #Username is required for authentication so if it not provided the we can return an error
-        if not username:
-            return Response({'data':{},'message':"Missing required fields username"})
+        if not username or not password:
+            return Response({'data':{},'message':"Missing required fields username or password"}, status=HTTP_400_BAD_REQUEST)
         
         #Password is neccesary but in the case where the user whats to login the app using oauth the password will not be provided so not happens execept for Local auth password is required.
         
         generated_password = generate_random_password(35)
         
-        user = User.objects.filter(username=username).exists() #Loockup the user in the database and if it exists confirm credentials
-        
-        if not user and not bool(create_new_account):
+        user = User.objects.filter(username=username) #Loockup the user in the database and if it exists confirm credentials
+
+        if not user.exists() and not bool(create_new_account):
             return Response({'data':{},'message':"User does not exist in the database"},status=HTTP_404_NOT_FOUND)
         
         __, created = User.objects.get_or_create(
@@ -80,7 +85,6 @@ def login_or_signup(request):
                 'bio':''
             }
         )
-        
         if not created:
             if __.auth_provider == 'L' and not __.check_password(password):
                 return Response({'data':{},'message':"Incorrect password"},status=HTTP_409_CONFLICT)
@@ -92,9 +96,8 @@ def login_or_signup(request):
             __.first_time_login = False 
             
         __.last_login = timezone.now()
-        
         token = RefreshToken.for_user(__)
-        token.set_exp(lifetime=timedelta(hours=5))
+        token.set_exp(lifetime=timedelta(hours=24))
         
         #Notify the user about the new password created for them in case the want to login using L i.e Local Authentication
         data = UserSerializer(__)
@@ -105,8 +108,7 @@ def login_or_signup(request):
         
         __.save() #Save the user as first-timeer if the created is true and then false it means that the user is already in the database
         
-        
-        return Response({'data':{**__data, **data.data},'message':f"{__.username.capitalize()} logged in successfully"},status=HTTP_200_OK)
+        return Response({'data':{**__data, **data.data},'message':f"{__.username.capitalize()} logged in successfully"}, status=HTTP_200_OK)
     
     except Exception as e:
         return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
@@ -264,103 +266,30 @@ class UserApiView(APIView):
       try:
             user:User = request.user #Get the current user
           
-            user_data = request.data
+            data = request.data
+            profile_image = image_uploader(data.get('profile_image', ''))
             
-            # All the request data are optional
-            email = user_data.get('email','')
-            first_name = user_data.get('first_name','')
-            last_name = user_data.get('last_name','')
-            favourites = user_data.get('favourites','')
-            age = user_data.get('age','')
-            bio = user_data.get('bio','')
-            profile_image = user_data.get('profile_image','')
-            account_type = user_data.get('account_type','')
+            user_data = None
             
-            #Teachers Data -->When editting the teacher profile if the user is a teacher
-            educational_level = user_data.get('educational_level','')
-            phone_num = user_data.get('phone_num','')
-            whatsapp_link = user_data.get('whatsapp_link','')
-            address = user_data.get('address','')
-            
-            #If we pass in the data we update them other wise leave them as they are before
-            user.email = email or user.email
-            user.first_name = first_name or user.first_name
-            user.last_name = last_name or user.last_name
-            user.age = age or user.age
-            user.bio = bio or user.bio
-            user.profile_image = profile_image or user.profile_image
-            user.account_type = account_type or user.account_type
-            
-            #Changing the state of the email verification in the case where email change
-            user.email_verified = user.email_verified if user.email_verified and user.email == email else False
-            
-            if bool(favourites) and 2 >= len(favourites) >= 5:
-             return Response({'data': {}, 'message': 'Select between two and five subjects'},status=HTTP_409_CONFLICT)
-         
-            if favourites:
-                #Now that we are here, we will check if the user is a teacher we will use specialization and if its a student we will use favourite
+            if profile_image:
+                user_data = {
+                **data,
+                'profile_image': profile_image or None,
+                }
+            else:
+                user_data = {
+                    **data
+                }
                 
-                categories = [] #Initializing an empty list to store the user favourites
-                
-                for i in favourites:
-                    try:
-                       category = Category.objects.get(body=i)
-                       categories.append(category)
-                    except ObjectDoesNotExist:
-                       return Response({'data': {}, 'message': "Category not found"},status=HTTP_404_NOT_FOUND)
-                
-                
-                if user.account_type == 'T':
-                    #--->Adding the user data recieve from the teacher
-                    teacher, created = TeachersAccount.objects.get_or_create(
-                        user=user,
-                        defaults={
-                        'educational_level':educational_level,
-                        'phone_num':phone_num,
-                        'whatsapp_link':whatsapp_link,
-                        'address':address,
-                        }
-                    )
-                    
-                    
-                    teacher.specializations.set(categories)
-                    
-                    #teacher.specializations.add(*categories)
-                    if not created:
-                        teacher.save()
-                        
-                        
-                else:
-                    student, created = StudentAccount.objects.get_or_create(
-                        user=user,
-                        defaults={
-                            "streaks_count": 1
-                        }
-                    )
-                
-                    
-                    student.favourites.set(categories)
-                
-                    if not created:
-                        student.save()
-                        
-                
-            #If the user has set his firstname, lastname and email and also email is verified then mark the user as completed sign up
-            if all([user.first_name, user.last_name, user.email, user.email_verified]):
-                user.signup_complete = True
+            data = UserSerializer(instance=user, data=user_data, partial=True)
+            if data.is_valid():
+                user.save()
+                return Response({'data':{},'message':'OK'}, status=HTTP_200_OK)
+            else:
+                return Response({'data':{},'message': str(data.errors)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
             
-            
-            user.save() # as the name implies this is to save the editted model to the database
-            
-            if bool(email) and user.email == email:
-      
-               response = requests.post(os.environ.get('QUIZLY_API_URL')+'/api/v1/auth/verify-email/',data={'email':email})
-               
-               if not response.ok:
-                   return Response({'data':{},'message': "Something went wrong..."},status=HTTP_500_INTERNAL_SERVER_ERROR)
-           
-            return Response({'data':{},'message':'OK'},status=HTTP_200_OK)
       except Exception as e:
+          print(e)
           return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
 class VerifyEmailApiView(APIView):
@@ -381,7 +310,7 @@ class VerifyEmailApiView(APIView):
          if email_verify.expires < timezone.now():
             return Response({'data':{},'message':'Verify token expired. Please request new token'},status=HTTP_400_BAD_REQUEST)
          
-         user = User.objects.get(email=email_verify.user.email)
+         user = User.objects.get(id=email_verify.user.id)
          user.email_verified = True
          
          user.save()
@@ -392,13 +321,17 @@ class VerifyEmailApiView(APIView):
       except Exception as e:
          return Response({'data':{},'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
       
+   permission_classes([IsAuthenticated])
    def post(self, request):
     try:
         
-        email = request.data.email
+        data = request.data
+        
+        email = data['email']
+        print(email)
         email = email.strip()
-
-        user = get_object_or_404(User, email=email)
+        user: User = request.user
+        
         verify_token = uuid.uuid4()
 
         expiration_time = timezone.now() + timedelta(minutes=25)
@@ -417,6 +350,7 @@ class VerifyEmailApiView(APIView):
                 'next_request': next_request
             }
         )
+
 
         if not created:
             # Update the existing EmailVerification object
@@ -446,6 +380,9 @@ class VerifyEmailApiView(APIView):
         except Exception as e:
             return Response({'data': {}, 'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
         
+        user.email = email
+        
+        user.save()
         email_verify.save()
         return Response({'data': {}, 'message': "Email verification link sent to your email address"},
                         status=HTTP_200_OK)
@@ -453,47 +390,120 @@ class VerifyEmailApiView(APIView):
     except Exception as e:
         return Response({'data': {}, 'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-#---->CATEGORY LOOKUPS<----
-@api_view(['GET'])
-def get_categories(request):
-    
-    try:
-        categories = Category.objects.all()
-        
-        serializer = CategorySerializer(categories, many=True)
-        serialized_data = serializer.data
-        
-        return Response({'data':serialized_data,'message':"OK"},status=HTTP_200_OK)
-    except Exception as e:
-        return Response({'data':{},'messages':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-#User APIs starts here
-@api_view(['GET'])
 @permission_classes([IsAuthenticated])
-def get_user_category(request):
-  
-    try:
+class TutorAccountAPI(APIView):
+    def get(self, request):
+        try:
+            user:User = request.user
+            try:
+                tutor = get_object_or_404(TeachersAccount, user__id=user.id)
+            except Exception as e:
+                return Response({'data':{'error':'not-found'},'message': str(e)}, status=HTTP_404_NOT_FOUND)
+            
+            
+            data = TeachersAccountSerializer(tutor)
+            
+            return Response({'data': data.data, 'message':'OK'}, status=HTTP_200_OK)
+            
+        except Exception as e:
+            return Response({'data':{},'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
+    def patch(self, request):
+        try:
+            user:User = request.user
+            tutor = get_object_or_404(TeachersAccount, user__id=user.id)
+            data = request.data
+            
+            data = TeachersAccountSerializer(instance=tutor, data=data, partial=True)
+            if data.is_valid():
+                data.save()
+                return Response({'data':{},'message':'OK'}, status=HTTP_200_OK)
+            else:
+                return Response({'data':{},'message':str(data.errors)}, status=HTTP_429_TOO_MANY_REQUESTS)
+            
+            return
+        except Exception as e:
+            return Response({'data':{},'message':str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
+
+@permission_classes([IsAuthenticated])
+class StudentAccountAPI(APIView):
+    def get(self, request):
+        try:
+            user: User = request.user
+            student = get_object_or_404(StudentAccount, user__id=user.id)
+            data = StudentAccountSerializer(student)
+            
+            return Response({'data':data.data,'message':'OK'}, status=HTTP_200_OK)
+        except Exception as e:
+            return Response({'data':{},'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
+
+class CategoryAPI(APIView):
+    def get(self, request):
+        try:
+            user: User = request.user
+            
+            categories = Category.objects.all()
         
-        user:User = request.user
+            serializer = CategorySerializer(categories, many=True)
+            serialized_data = serializer.data
+        
+            return Response({'data':serialized_data,'message':"OK"},status=HTTP_200_OK)
+        except Exception as e:
+            return Response({'data':{},'messages':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+
+    permission_classes([IsAuthenticated])
+    def post(self, request):
+        try:
+            data = request.data
+            user:User = request.user
+            
+            subjects = []
+            
+            for i in data['favourites']:
+                category = Category.objects.get(body=i)
+                subjects.append(category)
+            
+            if user.account_type == user.AccountType.TEACHER:
+                tutor = get_object_or_404(TeachersAccount, user__id=user.id)
+                tutor.specializations.set(subjects)
+            
+            if user.account_type == user.AccountType.STUDENT:
+                student = get_object_or_404(StudentAccount, user__id=user.id)
+                student.favourites.set(subjects)
+                
+            
+            return Response({'data':{},'message':'OK'}, status=HTTP_200_OK)
+            
+            
+        except Exception as e:
+            print(e)
+            return Response({'data':{},'message':str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
+#User APIs starts here
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_user_category(request):
+  
+#     try:
+        
+#         user:User = request.user
       
-        if user.account_type == 'T':
+#         if user.account_type == 'T':
           
-          specialization = TeachersAccount.objects.get(user=user).specializations
+#           specialization = TeachersAccount.objects.get(user=user).specializations
           
-          serializer = CategorySerializer(specialization,many=True)
-          serialized_data = serializer.data
+#           serializer = CategorySerializer(specialization, many=True)
+#           serialized_data = serializer.data
           
-        else:
+#         else:
           
-          favourites = StudentAccount.objects.get(user=user).favourites
+#           favourites = StudentAccount.objects.get(user=user).favourites
           
-          serializer = CategorySerializer(favourites,many=True)
-          serialized_data = serializer.data
+#           serializer = CategorySerializer(favourites,many=True)
+#           serialized_data = serializer.data
           
-        return Response({'data':serialized_data,'message':'OK'},status=HTTP_200_OK)
+#         return Response({'data':serialized_data,'message':'OK'},status=HTTP_200_OK)
       
-    except Exception as e:
-        return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 def get_quizzes(request):

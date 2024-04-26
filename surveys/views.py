@@ -14,6 +14,7 @@ from base.models import User
 from base.helpers import generate_random_letters
 
 from helpers import image_uploader, remove_image_path
+from emails import survey_invitation
 
 
 from .models import Surveys, SurveyBlockType, WelcomeScreen, ShortText, Rating, EndScreen, PhoneNumbers, Email, Number, Date, LongText, Website, RedirectWithUrl, DropDown, Choices, YesNo, PictureChoice, SurveyDesign, SurveySettings, LastUsedBlocks, SurveyLogic, UserReponse, SurveyParticipant
@@ -287,21 +288,21 @@ def generate_block_at_start(request):
             email=email,
             label=label_content,
             is_required=True,
-            index=4
+            index=3
          )
          create_block(
             question='Address 1',
             block_type=SurveyBlockType.BlockType.ShortText,
             label=label_content,
             short_text=short_text_2,
-            index=5
+            index=4
          )
          create_block(
             question='',
             label=label_content,
             block_type=SurveyBlockType.BlockType.EndScreen,
             end_screen=add_end_screen(),
-            index=6
+            index=5
          )
       
       if survey_type == GenerateSurveyType.POLL[1]:
@@ -382,6 +383,7 @@ def generate_block_at_start(request):
          create_choice_options(choices, choice) #Create the options
          create_choice_options(choices_one, choice_one) 
       
+      # Continue logic here
       if survey_type == GenerateSurveyType.REGISTRATION[1]:
          pass
       
@@ -396,12 +398,11 @@ def generate_block_at_start(request):
 @api_view(['GET'])
 def get_survey_details(request, id:str):
    try:
-      user:User = request.user
       survey = get_object_or_404(Surveys, id=id)
       survey_blocks = SurveyBlockType.objects.filter(survey__id=survey.id).all().order_by('index')
       user_id = request.query_params.get('surveyUserId', uuid4())
       
-      if survey.status == survey.Status.PRODUCTION and user.username != survey.host.username:
+      if survey.status == survey.Status.PRODUCTION and survey.host.id != user_id:
          survey.check_response_limit()
          survey.check_close_date()
          
@@ -410,9 +411,8 @@ def get_survey_details(request, id:str):
             'survey':survey,
          })
          
-         
          if participant.survey_is_completed:
-            return Response({'data':{},'message':'Thank you for your participation, you have completed this survey'}, status=HTTP_409_CONFLICT)
+            return Response({'data':{'error':'is-completed'},'message':'Thank you for your participation, you have completed this survey'}, status=HTTP_409_CONFLICT)
 
          
 
@@ -471,6 +471,9 @@ class SurveysAPIVIEW(APIView):
     try:
         user: User = request.user
         data = request.data
+        
+        if not user.email_verified:
+           return Response({'data':{'error':'email-verification-required'},'message':'Please verify your email before you continue.'}, status=HTTP_400_BAD_REQUEST)
 
         name = data['name']
         id = data.get('id', uuid4())
@@ -569,7 +572,8 @@ class SurveyBlocks(APIView):
          
          if action == 'ADD':
             new = block_model.objects.create()
-            index = SurveyBlockType.objects.filter(survey__id=survey.id).count()
+            index = SurveyBlockType.objects.filter(survey__id=survey.id).order_by('-index').first().index
+            print(index)
          
             survey_blocks = SurveyBlockType(
             survey=survey,
@@ -591,7 +595,6 @@ class SurveyBlocks(APIView):
             copied_block = block_modal.objects.filter(id=block_id)
             new_block = copied_block.first()
             new_block.id = uuid4()
-            new_block.index = copied_block.first().index
             new_block.save()
             
             survey_block = SurveyBlockType(
@@ -1173,7 +1176,6 @@ def toggle_survey_status(request, survey_id: str):
                   return Response({'data': {}, 'message': f'{social_media.media_type.capitalize()} is missing a link, Please add it'}, status=HTTP_400_BAD_REQUEST)
 
                
-
          picture_ids = SurveyBlockType.objects.filter(picture_choice__isnull=False, survey__id=survey.id).values_list('picture_choice__id', flat=True)
          
          if len(picture_ids):
@@ -1186,14 +1188,13 @@ def toggle_survey_status(request, survey_id: str):
          # If all the checks are passed then user can publish without any issue
 
          subject = f"New survey available for you by {survey.host.username}"
-         body = ''
+         path = os.environ.get('QUIZLY_CLIENT_URL') + '/survey/' + str(survey.id)
+         body = survey_invitation(path)
          
          if len(recipients): send_email(subject, body, recipients)
 
       # Perform a lot of checks before concluding to publish
       survey.status = mode
-      
-      
       survey.save()
       
       return Response({'data':{},'message':'OK'}, status=HTTP_200_OK)
@@ -1220,25 +1221,25 @@ class SurveyResponses(APIView):
          survey.check_response_limit()
          
          user = get_object_or_404(SurveyParticipant, user_id=user_id, survey__id=survey.id)
+         print(user)
          
          if user.survey_is_completed:
             return Response({'data':{'error':'is_completed'},'message':'Thank you for your participation, you have completed this survey'}, status=HTTP_409_CONFLICT)
             
          
          modify_user_responses = []
-         
-         
          for i in user_response:
-            block = get_object_or_404(SurveyBlockType, id=i['block'])
+            block = get_object_or_404(SurveyBlockType, id=i['block'], survey__id=survey.id)
             
             if block.is_required and not i['response']:
                return Response({'data':{},'message':"There are some required  questions that hasn't been answered."}, status=HTTP_400_BAD_REQUEST)
             
-            data = {
-               'response': i['response'],
-               'block': block,
-               'user': user
-            }
+            
+            data = UserReponse(
+               user=user,
+               response=i['response'],
+               block=block
+            )
             
             modify_user_responses.append(data)
            

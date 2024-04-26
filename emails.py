@@ -29,6 +29,34 @@ def otp_message(otp: str):
 </html>
 """
 
+
+def survey_invitation(link: str):
+  return f"""
+  <!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Survey Invitation</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f3f3f3;">
+    <div style="max-width: 600px; margin: 20px auto; padding: 20px; background-color: #ffffff; border-radius: 10px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);">
+        <h1 style="color: #4CAF50; text-align: center; margin-bottom: 20px;">Survey Invitation</h1>
+        <p style="color: #333333; margin-bottom: 20px;">Hello there,</p>
+        <p style="color: #333333; margin-bottom: 20px;">You've been invited to participate in a survey! Your opinion matters to us.</p>
+        <p style="color: #333333; margin-bottom: 20px;">Click the button below to start the survey:</p>
+        <p style="margin-bottom: 20px;"><a href={link} style="display: inline-block; padding: 8px 18px; background-color: #4CAF50; color: #ffffff; text-decoration: none; border-radius: 5px;">Take Survey</a></p>
+        <p style="color: #333333; margin-bottom: 20px;">If the button above doesn't work, you can copy and paste the following link into your browser:</p>
+        <p style="color: #333333; margin-bottom: 20px;">Survey Link: <a href={link} style="color: #4CAF50;">{link}</a></p>
+        <p style="color: #333333;">Thank you for your participation!</p>
+    </div>
+</body>
+</html>
+
+
+"""
+
+
 def verify_email_address(link: str):
     return f"""
 <!DOCTYPE html>
