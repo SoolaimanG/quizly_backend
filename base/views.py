@@ -8,7 +8,7 @@ import os
 import uuid
 import requests
 
-from .models import User, ForgetPassword, EmailVerification, StudentAccount, TeachersAccount,Category,Question,Quiz, Comments, AttemptedQuizOfUser, AnonymousUser, AttemptedQuizByAnonymousUser, ScoreBoard, SavedQuiz, Ratings, QuizReports, Notifications, FeatureWaitList
+from .models import User, ForgetPassword, EmailVerification, StudentAccount, TeachersAccount,Category, Notifications, FeatureWaitList
 from rest_framework.response import Response
 from rest_framework.decorators import permission_classes,api_view
 from rest_framework.permissions import IsAuthenticated
@@ -18,17 +18,17 @@ from django.utils import timezone
 from django.contrib.auth import password_validation
 from django.contrib.auth.hashers import make_password
 from rest_framework_simplejwt.tokens import RefreshToken
-from rest_framework.status import HTTP_200_OK, HTTP_404_NOT_FOUND, HTTP_500_INTERNAL_SERVER_ERROR,HTTP_400_BAD_REQUEST, HTTP_429_TOO_MANY_REQUESTS,HTTP_409_CONFLICT, HTTP_401_UNAUTHORIZED
-from .helpers import generate_otp,send_email, generate_random_email,generate_random_password, mark_quiz, get_next_question, get_trending_quiz, has_started_quiz, check_access_token, evaluate_user_answer, check_quiz_type, give_user_feedback, create_result_response_data, notification_helper
+from rest_framework.status import HTTP_200_OK, HTTP_404_NOT_FOUND, HTTP_500_INTERNAL_SERVER_ERROR,HTTP_400_BAD_REQUEST, HTTP_429_TOO_MANY_REQUESTS,HTTP_409_CONFLICT
+from .helpers import generate_otp,send_email, generate_random_email,generate_random_password, has_started_quiz, notification_helper
 from emails import otp_message, verify_email_address
-from serializers import UserSerializer, CategorySerializer, QuizSerializer, QuestionSerializer, CommentsSerializer, UUIDListSerializer, ResultSerializer, RelatedQuizSerializer, RelatedQuizSerializerForTutor, NotificationSerializer, TeachersAccountSerializer, StudentAccountSerializer
+from serializers import UserSerializer, CategorySerializer, NotificationSerializer, TeachersAccountSerializer, StudentAccountSerializer
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
-from django.core.exceptions import ObjectDoesNotExist
-from django.db import models
+# from django.core.exceptions import ObjectDoesNotExist
+# from django.db import models
 from django.db.models import Q
-from ipware import get_client_ip
-from django.db import transaction
+# from ipware import get_client_ip
+# from django.db import transaction
 
 from helpers import image_uploader
 
@@ -477,119 +477,6 @@ class CategoryAPI(APIView):
         except Exception as e:
             print(e)
             return Response({'data':{},'message':str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
-#User APIs starts here
-# @api_view(['GET'])
-# @permission_classes([IsAuthenticated])
-# def get_user_category(request):
-  
-#     try:
-        
-#         user:User = request.user
-      
-#         if user.account_type == 'T':
-          
-#           specialization = TeachersAccount.objects.get(user=user).specializations
-          
-#           serializer = CategorySerializer(specialization, many=True)
-#           serialized_data = serializer.data
-          
-#         else:
-          
-#           favourites = StudentAccount.objects.get(user=user).favourites
-          
-#           serializer = CategorySerializer(favourites,many=True)
-#           serialized_data = serializer.data
-          
-#         return Response({'data':serialized_data,'message':'OK'},status=HTTP_200_OK)
-      
-#     except Exception as e:
-#         return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-@api_view(['GET'])
-def get_quizzes(request):
-    try:
-        size = request.query_params.get('len','5')
-        size = int(size)
-        
-        #If the user is authenticated find quizzes for user base on the user category
-        if request.user.is_authenticated:
-            pass
-        else:
-            quizzes = Quiz.objects.annotate(participants_count=models.Count('participants')).order_by('-participants_count')[:size] #This simply means get the quizzes most users attend
-            data = QuizSerializer(quizzes, many=True)
-        
-        return Response({'data':data.data,'message':"OK"},status=HTTP_200_OK)
-    except Exception as e:
-        print(e)
-        return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-@api_view(['GET'])
-def get_trending(request): 
-    try:
-        anonymous_id = request.query_params.get('anonymous_id')
-        ip_address = request.query_params.get('ip_address', '123.54.98')
-         
-        trending_quiz = get_trending_quiz(1)
-        has_user_started_quiz = False
-
-        user:User = request.user
-        # print(trending_quiz)
-        
-        if user.is_authenticated:
-            user:User = request.user  # Current authenticated user
-            has_user_started_quiz = has_started_quiz(
-                auth=True,
-                user=user,
-                quiz=trending_quiz,
-                anonymous_user='' #Anonymous user will be empty in this case cause user is authrnticated.
-            )
-        else:
-            if anonymous_id:
-                anonymous_user = AnonymousUser.objects.filter(
-                    Q(anonymous_id=anonymous_id) | Q(ip_address=ip_address)
-                ).first()
-                if anonymous_user:
-                    has_user_started_quiz = has_started_quiz(
-                        auth=False,
-                        anonymous_user=anonymous_user,
-                        quiz=trending_quiz,
-                        user=''
-                    )
-
-        # Provide context during serializer initialization
-        serializer = QuizSerializer(trending_quiz, context={'has_user_started_quiz': has_user_started_quiz}, many=True)
-        # Access the serialized data
-        serialized_data = serializer.data
-
-        return Response({'data': serialized_data, 'message': 'OK'}, status=HTTP_200_OK)
-    except Exception as e:
-        return Response({'data': {}, 'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-@api_view(['GET'])
-def quiz_comments(request, id):
-    try:
-        
-        if not id:
-            return Response({'data':{},'message':'Quiz Id is required.'},status=HTTP_404_NOT_FOUND)
-        
-        quiz = get_object_or_404(Quiz, id=id)
-        comments = Comments.objects.filter(quiz=quiz).order_by('-created_at')
-        
-        
-        if request.user.is_authenticated:
-            size = request.query_params.get('size', 20)
-            size = int(size)
-            
-            comments = comments[:size]
-        else:
-            comments = comments[:10]
-            
-        data = CommentsSerializer(comments, many=True)
-        
-        return Response({'data':data.data,'message':'OK'},status=HTTP_200_OK)
-        
-    except Exception as e:
-        return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['GET'])
 @permission_classes([IsAuthenticated])
@@ -602,106 +489,6 @@ def isUserAuthenticated(request):
         print(e)
         return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['POST'])
-@transaction.atomic
-def start_quiz(request):
-    try:
-     data = request.data
-     
-     quiz_id = data.get('quiz_id')
-     access_key = data.get('access_key','')
-     anonymous_id = data.get('anonymous_id', '') #While this is optional it helps track users score
-     ip_address = '123.129.00' or data.get('ip_address','')
-     
-     access_key = access_key.strip()
-     
-    
-     quiz:Quiz = get_object_or_404(Quiz, id=quiz_id)# Get the current quiz to be attempted
-     quiz_questions = Question.objects.filter(quiz_id=quiz).count() # List of number the questions related to the quiz
-     
-    # This checks if the request matches the quiz to be taken
-     check_quiz_type(
-         quiz=quiz,
-         request=request,
-     )
-     
-    #  The quiz needs access key to start
-     if quiz.access_with_key:
-         if not access_key:
-            return Response({'data':{},'message':'This quiz requires access code to start'}, status=HTTP_404_NOT_FOUND)
-        
-        #Find key access code in DB
-         try:
-            check_access_token(access_token=access_key,quiz=quiz)
-         except Exception as e:
-            return Response({'data':{},'message':str(e)},status=HTTP_400_BAD_REQUEST)
-     
-     if request.user.is_authenticated:
-         
-      user:User = request.user #Current login user
-     
-
-      student = StudentAccount.objects.filter(user=user).first()
-
-      if not student:
-        return Response({'data':{},'message':"User is does not has a student account"},status=HTTP_409_CONFLICT)
-
-        #  #If the user is not a participant of that quiz, then add the user as a  participant and start quiz
-      if not quiz.participants.filter(id=student.id).exists():
-        quiz.participants.add(student)
-    
-        #If user does not have a quiz tracker of that quiz already, Create one for them 
-      quiz_tracker, ___ = AttemptedQuizOfUser.objects.get_or_create(quiz=quiz, attempted_by=student,
-      defaults={
-       'quiz':quiz,
-       'is_completed':False,
-       'attempted_by': student,
-      })
-    #  
-      if quiz_tracker.is_completed:
-       return Response({'data':{},'message':'You already completed this quiz'},status=HTTP_400_BAD_REQUEST)
-   
-      if quiz_tracker.quiz.allowed_users == quiz_tracker.quiz.ALLOWEDUSERS.ONLY_MY_STUDENTS:
-        #  Check if user is a student of the tutor
-        am_a_member = quiz_tracker.quiz.host.students.filter(id=student.id).exists()
-        
-        if not am_a_member:
-            return Response({'data':{},'message': f'You are not a student of this tutor, subscribe to {quiz_tracker.quiz.host.user.username} to get access'},status=HTTP_401_UNAUTHORIZED)
-      
-     else:
-         
-        # This is use to create or get user if existing
-        anonymous_user, created = AnonymousUser.objects.get_or_create(anonymous_id=anonymous_id,defaults={
-            'ip_address': ip_address[0],
-            'anonymous_id':anonymous_id
-        })
-        
-        if not created and anonymous_user.completed_quiz.filter(id=quiz.id).exists():
-            return Response({'data':{},'message':'You already completed this quiz. Go to settings and navigate to retake quiz'},status=HTTP_400_BAD_REQUEST)
-        
-        
-        if quiz.allowed_users != quiz.ALLOWEDUSERS.ALL:
-            return Response({'data':{},'message':'You are not allowed to participate in this quiz'},status=HTTP_401_UNAUTHORIZED)
-        
-        question = Question.objects.filter(quiz_id=quiz).first()
-        AttemptedQuizByAnonymousUser.objects.get_or_create(
-            quiz=quiz,
-            attempted_by=anonymous_user,
-            question=question
-        )
-     
-     next_question = get_next_question(quiz.id, quiz_questions, request.user.is_authenticated)
-
-
-     data = UUIDListSerializer(data={'uuids':next_question})
-     
-     if not data.is_valid():
-         return Response({'data':{},'message':str(data.errors)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-     
-     return Response({'data':data.data,'message':'OK'}, status=HTTP_200_OK)
-     
-    except Exception as e:
-        return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
@@ -753,545 +540,201 @@ def create_student_or_teacher_account(request):
    except Exception as e:
         return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['GET'])
-def get_question(request, id: str):
- try:
-  
-  if not id:
-   return Response({'data':{},'message':'Missing required parameter'},status=HTTP_404_NOT_FOUND)
-  
-  try:
-   
-   question = Question.objects.get(id=id) 
-   
-   question_serializer = QuestionSerializer(question)
-   
-   return Response({'data':question_serializer.data,'message':'OK'},status=HTTP_200_OK)
-   
-  except Question.DoesNotExist:
-   return Response({'data':{},'message':'Question with this id does not exist'},status=HTTP_404_NOT_FOUND,)
-  
- except Exception as e:
-  return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-@api_view(['GET'])
-def get_quiz_questions(request, id: str):
-    try:
-        user: User = request.user
-        anonymous_id = request.query_params.get('anonymous_id', '')
-        # Make sure the quiz user wants to get its question exist
-        try:
-            quiz = get_object_or_404(Quiz, id=id)
-        except Quiz.DoesNotExist:
-            return Response({'data':{},"message":"Quiz with this ID does not exists."},status=HTTP_404_NOT_FOUND)
-        
-        
-        # Locate the user tracker for that quiz, this shows that user has click the start button
-        if user.is_authenticated:
-            tracker = AttemptedQuizOfUser.objects.filter(quiz=quiz, attempted_by__user=user)
-            quiz_tracker = tracker.exists()
-            questions_answered = tracker.first().questions_answered_by_student.count()
-        else:
-            tracker = AttemptedQuizByAnonymousUser.objects.filter(quiz=quiz, attempted_by__anonymous_id=anonymous_id)
-            quiz_tracker = tracker.exists()
-            questions_answered = tracker.filter(user_answer__gt=0).count()
 
 
-        
-        if not quiz_tracker:
-            return Response({'data':{},"message":'Unable to locate your tracker, Please Click on start quiz button'},status=HTTP_404_NOT_FOUND)
-        
-        total_questions = Question.objects.filter(quiz_id=quiz).count()
-        
-        id_limits = 5 if not user.is_authenticated else total_questions
-        
-        # Get all the questions related to this Quiz [IDs]
-        questions_ids = Question.objects.filter(quiz_id=quiz).values_list('id', flat=True)[:id_limits]
 
-        data = UUIDListSerializer(data={'uuids': questions_ids})
-        
-        print(data)
-
-        if not data.is_valid():
-            return Response({'data':{},"message": str(data.error_messages)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
-        
-        questions_remaining = False
-        
-        if not user.is_authenticated: questions_remaining = total_questions > id_limits
-        
-        
-        return Response({'data':{'ids': data.data['uuids'], 'questions_remaining': questions_remaining, 'questions_answered': questions_answered },'message':'OK'},status=HTTP_200_OK)
-
-
-    except Exception as e:
-        return Response({'data':{},"message":str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-@api_view(['POST'])
-def mark_user_question(request):
-    from .helpers import check_quiz_time
-    try:
-        data = request.data
-        user_answer = data.get('user_answer')
-        question_id = data.get('question_id')
-        anonymous_id = data.get('anonymous_id','')
-        
-        
-        user:User | None = request.user
-        editted = False
-        
-        #First get the associated quiz of the question
-        try:
-            question = Question.objects.get(id=question_id)
-            quiz = Quiz.objects.get(id=question.quiz_id.id)
-        except Question.DoesNotExist or Quiz.DoesNotExist:
-            return Response({'data':{},'message':'Question with this ID not found'},status=HTTP_404_NOT_FOUND)
-        
-        # Before marking the user question check if the user is using assign time by the tutor
-        if bool(quiz.time_limit): check_quiz_time(quiz=quiz, anonymous_id=anonymous_id, user=user)
-        
-        
-        if not user.is_authenticated:
-          
-            quiz_tracker = AttemptedQuizByAnonymousUser.objects.filter(
-                Q(attempted_by__anonymous_id=anonymous_id) & Q(quiz=quiz)
-            )
-
-            # If user has completed the quiz no need to mark question again
-            if AnonymousUser.objects.get(anonymous_id=anonymous_id).completed_quiz.filter(id=quiz.id).exists():
-                return Response({'data':{},'message':'Cannot remark question, you already completed this quiz'},status=HTTP_409_CONFLICT)
-
-            if not quiz_tracker.first():
-                return Response({'data':{},'message':'Unable to locate your quiz tracker'},status=HTTP_404_NOT_FOUND)
-            
-       
-            has_user_attempted_question = quiz_tracker.filter(Q(question__id=question_id) & Q(user_answer__gt=0)
-            ).values('user_answer').first()
-            has_user_attempted_question = has_user_attempted_question['user_answer'] if has_user_attempted_question is not None else False
-
-        else:
-            
-            quiz_tracker = get_object_or_404(AttemptedQuizOfUser, attempted_by__user=user, quiz=quiz)
-
-            print(quiz_tracker)
-
-            # If the quiz has been completed no need to remark the question
-            if quiz_tracker.is_completed:
-                return Response({'data':{},'message':'Cannot remark question, you already completed this quiz'}, status=HTTP_409_CONFLICT)
-
-
-            user_answers:List = quiz_tracker.answers
-            
-            has_user_attempted_question = next(filter(lambda x: x['question_id'] == question_id, user_answers), None)
-        #If the type is mark on click then there is no need for user to answer twice
-     
-        if quiz.result_display_type == quiz.ResultDisplayType.ON_COMPLETE and bool(has_user_attempted_question):
-            return Response({'data':{},'message':'You already answered this question'},status=HTTP_409_CONFLICT)
-        else:
-            mark_quiz(
-                question_id=question_id,
-                user_answer=user_answer,
-                quiz_tracker=quiz_tracker.first() if not user.is_authenticated else quiz_tracker,
-                auth=request.user.is_authenticated
-            )
-        
-        #If the type is different from above then user can modify answer
-        if quiz.result_display_type == quiz.ResultDisplayType.ON_SUBMIT:
-
-                if request.user.is_authenticated:
-                    for item in quiz_tracker.answers:
-                        if item['question_id'] == str(question.id):
-                             # Update the user_answer for the matching question_id
-                            item['user_answer'] = user_answer
-                        #Save the updated quiz_tracker
-                    quiz_tracker.save()
-                else:
-                    anonymous_user = AnonymousUser.objects.get(anonymous_id=anonymous_id)
-                    quiz_tracker, created = AttemptedQuizByAnonymousUser.objects.get_or_create(attempted_by=anonymous_user, quiz=quiz, question=question, defaults={
-                        'user_answer':user_answer,
-                    })
-                    
-                    if not created:
-                        editted = quiz_tracker.user_answer != user_answer
-                        quiz_tracker.user_answer = user_answer
-                        quiz_tracker.save()  
-        
-        result = evaluate_user_answer(question, user_answer)
-
-        show_answer = quiz.result_display_type == quiz.ResultDisplayType.ON_COMPLETE
-        correct_answer = result['correct_answer'] if show_answer else None
-        is_correct = result['is_correct'] if show_answer else None
-        
-        data = {'show_answer': show_answer,'correct_answer': correct_answer,'is_correct':is_correct,'question_type':question.question_type, 'editted': editted}
-        
-        return Response({'data':data,'message':'OK'},status=HTTP_200_OK)
-
-    except Exception as e:
-        return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-
-@api_view(['GET'])
-@transaction.atomic()
-def get_quiz_result(request):
- try:
-  
-  user:User=request.user
-  data = request.query_params
-  quiz_id = data.get('quiz_id')
-  anonymous_id = data.get('anonymous_id', '')
-  ip_address = data.get('ip_address', get_client_ip(request)[0])
-  
-  wrong_answer_count = 0
-  corrections = []
-  
-  try:
-    quiz = get_object_or_404(Quiz, id=quiz_id)
-  except Quiz.DoesNotExist:
-      return Response({'data':{},'message':"Either you have not start this quiz or quiz does not exist"}, status=HTTP_404_NOT_FOUND)
-  
-  total_question = Question.objects.filter(quiz_id=quiz).count()
-  expected_xp = Question.objects.filter(quiz_id=quiz).aggregate(expected_xp=models.Sum('question_point')).get('expected_xp', None)
-  
-  if user.is_authenticated:
-        student = get_object_or_404(StudentAccount, user=user)
-        quiz_tracker = get_object_or_404(AttemptedQuizOfUser, attempted_by=student, quiz=quiz)
-        
-        user_answers: list = quiz_tracker.answers
-        questions_attempted = quiz_tracker.questions_answered_by_student.count()
-        
-        
-        score_board, created = ScoreBoard.objects.get_or_create(
-            user=student,
-            quiz=quiz,
-            defaults={
-                'user': student,
-                'quiz': quiz,
-                'xp_earn': quiz_tracker.XP,
-                'start_time': quiz_tracker.created_at,
-                'end_time': timezone.now(),
-                'attempted_question': questions_attempted,
-                'expected_xp': expected_xp,
-                'total_question': total_question,
-                'feedback': give_user_feedback(quiz_tracker.XP, expected_xp),
-            }
-        )
-        
-        if not created:
-            data = create_result_response_data(score_board, total_question)
-            serialized_data = ResultSerializer(data=data)
-
-            if not quiz_tracker.is_completed:
-                quiz_tracker.is_completed = True
-                quiz_tracker.save()
-
-            if not serialized_data.is_valid():
-                return Response({'data':{},'message':str(serialized_data.error_messages)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-            
-            return Response({'data':serialized_data.data,'message':'OK'},status=HTTP_200_OK)
-            
-        #check for wrong answers
-        for i in range(total_question):
-            
-            question = Question.objects.get(id=user_answers[i]['question_id'])
-            result = evaluate_user_answer(question, user_answers[i]['user_answer'] or '')
-            
-            if not result['is_correct']:
-                wrong_answer_count += 1
-                correct_answer = {'question': question.question_body, 'correct_answer': question.correct_answer_explanation}
-                corrections.append(correct_answer)
-      
-        score_board.wrong_answers = wrong_answer_count
-        score_board.corrections = corrections
-        score_board.xp_earn = quiz_tracker.XP
-        score_board.start_time = quiz_tracker.created_at
-        score_board.save()
-      
-        quiz_tracker.is_completed = True
-        quiz_tracker.save()
-
-        # Notify the user that the quiz is completed
-        notification_helper(
-            user,
-            f'You just completed {quiz.title}, congratulations',
-            Notifications.NotificationType.DEFAULT
-        )
-        
-        data = create_result_response_data(score_board, total_question)
-        serialized_data = ResultSerializer(data=data)
-            
-        if not serialized_data.is_valid():
-            return Response({'data':{},'message':str(serialized_data.errors)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-            
-        return Response({'data':serialized_data.data,'message':'OK'},status=HTTP_200_OK)
-  else:
-    #  Find the anonymous user'
-    anonymous_user = AnonymousUser.objects.filter(
-        Q(anonymous_id=anonymous_id) | Q(ip_address=ip_address)
-    ).first()
-    
-    if not anonymous_user:
-        return Response({'data':{},'message':''},status=HTTP_404_NOT_FOUND)
-    
-    quiz_tracker = AttemptedQuizByAnonymousUser.objects.filter(
-        Q(attempted_by=anonymous_user) & Q(quiz=quiz)
-    ).all()
-    
-    if quiz_tracker.count() == 0:
-        return Response({'data':{},'message':"You have'nt attempt this quiz."},status=HTTP_400_BAD_REQUEST)
-    
-    for i in range(total_question):
-        
-        if i == quiz_tracker.count():
-            break
-        
-        result = evaluate_user_answer(quiz_tracker[i].question, quiz_tracker[i].user_answer)
-        
-        if not result['is_correct']:
-            wrong_answer_count += 1
-            correct_answer = {'question':quiz_tracker[i].question.question_body, 'correct_answer':quiz_tracker[i].question.correct_answer_explanation}
-            corrections.append(correct_answer)
-            
-    xp_earn = quiz_tracker.aggregate(xp_earn=models.Sum('xp_earn')).get('xp_earn', 0)
-    
-    #Add all the scores together
-    feedback = give_user_feedback(xp_earn, expected_xp)
-    start_time = quiz_tracker.order_by('created_at').values('created_at').first().get('created_at', timedelta(minutes=10))
-    end_time = quiz_tracker.order_by('created_at').values('created_at').last().get('created_at', timedelta(minutes=10))
-    attempted_questions = AttemptedQuizByAnonymousUser.objects.filter(
-        Q(attempted_by=anonymous_user) & Q(user_answer__gt=0) & Q(quiz=quiz)
-    ).count()
-    
-    anonymous_user.xp = xp_earn
-    anonymous_user.completed_quiz.add(quiz)
-    anonymous_user.save()
-    
-    
-    #Mark quiz as completed
-    data ={'feedback':feedback,'corrections':corrections, 'attempted_questions': attempted_questions,'start_time':start_time,'wrong_answers':wrong_answer_count,'xp_earn':xp_earn, 'total_questions':total_question, 'expected_xp':expected_xp,'end_time':end_time}
-    serializer = ResultSerializer(data=data)
-    
-    if not serializer.is_valid():
-        return Response({'data':{},'message':str(serializer.errors)},status=HTTP_500_INTERNAL_SERVER_ERROR)
-    #Result to display to user will contain --> Their Score, Total Questions, Questions They Attempted, Questions They Failed, Questions They Got Correct, Time They Used and Time remaining for them
-  
-    return Response({'data':serializer.data,'message':'OK'},status=HTTP_200_OK)
-  
- except Exception as e:
-  return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
  
-@api_view(['POST'])
-def retake_a_quiz(request):
-    try:
-        data = request.data
-        quiz_id = data.get('quiz_id')
-        anonymous_id = data.get('anonymous_id', '')
-        ip_address = data.get('ip_address', '123.129.00')
-        user = request.user
+# @api_view(['POST'])
+# def retake_a_quiz(request):
+#     try:
+#         data = request.data
+#         quiz_id = data.get('quiz_id')
+#         anonymous_id = data.get('anonymous_id', '')
+#         ip_address = data.get('ip_address', '123.129.00')
+#         user = request.user
 
-        # Check if the user is authenticated or not
-        quiz = get_object_or_404(Quiz, id=quiz_id)
+#         # Check if the user is authenticated or not
+#         quiz = get_object_or_404(Quiz, id=quiz_id)
         
-        if not quiz.allow_retake:
-            return Response({'data':{},'message':'This quiz does not allow retakes'}, status=HTTP_401_UNAUTHORIZED)
+#         if not quiz.allow_retake:
+#             return Response({'data':{},'message':'This quiz does not allow retakes'}, status=HTTP_401_UNAUTHORIZED)
 
-        if user.is_authenticated:
-            # Find the tracker and delete it if the user wants to try again
-            quiz_tracker = AttemptedQuizOfUser.objects.get(quiz=quiz, attempted_by__user=user)
-            get_object_or_404(ScoreBoard, quiz=quiz, user=quiz_tracker.attempted_by).delete()
+#         if user.is_authenticated:
+#             # Find the tracker and delete it if the user wants to try again
+#             quiz_tracker = AttemptedQuizOfUser.objects.get(quiz=quiz, attempted_by__user=user)
+#             get_object_or_404(ScoreBoard, quiz=quiz, user=quiz_tracker.attempted_by).delete()
             
-            quiz_tracker.attempted_by.xp -= quiz_tracker.XP            
+#             quiz_tracker.attempted_by.xp -= quiz_tracker.XP            
             
-            quiz_tracker.attempted_by.save()
+#             quiz_tracker.attempted_by.save()
             
-            quiz_tracker.delete()
-            response_message = 'Authenticated user attempt cleared.'
-        else:
-            AttemptedQuizByAnonymousUser.objects.filter(
-                Q(quiz=quiz) & Q(attempted_by__anonymous_id=anonymous_id)
-            ).delete()
-            #Find the quiz that was mark as completed then remove it 
-            AnonymousUser.objects.get(anonymous_id=anonymous_id).completed_quiz.remove(quiz)
-            response_message = 'Anonymous user attempt cleared.'
+#             quiz_tracker.delete()
+#             response_message = 'Authenticated user attempt cleared.'
+#         else:
+#             AttemptedQuizByAnonymousUser.objects.filter(
+#                 Q(quiz=quiz) & Q(attempted_by__anonymous_id=anonymous_id)
+#             ).delete()
+#             #Find the quiz that was mark as completed then remove it 
+#             AnonymousUser.objects.get(anonymous_id=anonymous_id).completed_quiz.remove(quiz)
+#             response_message = 'Anonymous user attempt cleared.'
 
-        return Response({'data': {}, 'message': response_message}, status=HTTP_200_OK)
+#         return Response({'data': {}, 'message': response_message}, status=HTTP_200_OK)
 
-    except Quiz.DoesNotExist:
-        return Response({'data': {}, 'message': 'Quiz with this ID does not exist'}, status=HTTP_404_NOT_FOUND)
+#     except Quiz.DoesNotExist:
+#         return Response({'data': {}, 'message': 'Quiz with this ID does not exist'}, status=HTTP_404_NOT_FOUND)
 
-    except Exception as e:
-        return Response({'data': {}, 'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         return Response({'data': {}, 'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['POST'])
-@permission_classes([IsAuthenticated])
-def add_comment_to_quiz(request):
-    user:User = request.user
-    
-    data = request.data
-    quiz_id = data['quiz_id']
-    comment = data['comment']
-    
-    try:
-        #First run model to avoid abuse or incensitive comment
-        quiz = get_object_or_404(Quiz, id=quiz_id)
+
+# @api_view(['GET'])
+# def quiz_timer(request, quiz_id: str):
+#     from .helpers import check_quiz_time
+#     try:
+#         data = request.query_params 
+
+#         anonymous_id =  data.get('anonymous_id', None)
+#         anonymous_id = anonymous_id if anonymous_id else None
+#         user:User = request.user
+
+#     	# After checking if the user is online or not find the quiz they are attending and the tracker
+#         try:
+#             quiz = get_object_or_404(Quiz, id=quiz_id)
+#         except Quiz.DoesNotExist:
+#             return Response({'data':{},'message':"Quiz with this ID does not exist"}, status=HTTP_404_NOT_FOUND)
         
-        comment = Comments(
-            user=user,
-            body=comment,
-            quiz=quiz
-        )
-        
-        comment.save()
-        data = CommentsSerializer(comment)
-        return Response({'data':data.data, 'message':'OK'},status=HTTP_200_OK)
-    except Exception as e:
-        return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+#         quiz_duration = quiz.time_limit#The duration like time set by the tutor to finish quiz
 
-@api_view(['GET'])
-def quiz_timer(request, quiz_id: str):
-    from .helpers import check_quiz_time
-    try:
-        data = request.query_params 
+#         # First check if the quiz is time-base quiz else do nothing 
+#         if not bool(quiz_duration):
+#             return Response({'data':{},'message':'No time is assign to this quiz'},status=HTTP_200_OK)
 
-        anonymous_id =  data.get('anonymous_id', None)
-        anonymous_id = anonymous_id if anonymous_id else None
-        user:User = request.user
-
-    	# After checking if the user is online or not find the quiz they are attending and the tracker
-        try:
-            quiz = get_object_or_404(Quiz, id=quiz_id)
-        except Quiz.DoesNotExist:
-            return Response({'data':{},'message':"Quiz with this ID does not exist"}, status=HTTP_404_NOT_FOUND)
-        
-        quiz_duration = quiz.time_limit#The duration like time set by the tutor to finish quiz
-
-        # First check if the quiz is time-base quiz else do nothing 
-        if not bool(quiz_duration):
-            return Response({'data':{},'message':'No time is assign to this quiz'},status=HTTP_200_OK)
-
-        remaining_time = check_quiz_time(quiz=quiz, anonymous_id=anonymous_id, user=user)
+#         remaining_time = check_quiz_time(quiz=quiz, anonymous_id=anonymous_id, user=user)
             
-        # Time is still remaining for user just send back remaining time :)
-        return Response({'data':{'time_remaining':remaining_time * 60}, 'message':'OK'},status=HTTP_200_OK)
+#         # Time is still remaining for user just send back remaining time :)
+#         return Response({'data':{'time_remaining':remaining_time * 60}, 'message':'OK'},status=HTTP_200_OK)
 
-    except Exception as e:
-        print(e)
-        return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         print(e)
+#         return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['GET'])
-def get_quiz_details(request, id):
-    try:
-        data = request.query_params
-        anonymous_id = data.get('anonymous_id', '')
-        user: User = request.user
+# @api_view(['GET'])
+# def get_quiz_details(request, id):
+#     try:
+#         data = request.query_params
+#         anonymous_id = data.get('anonymous_id', '')
+#         user: User = request.user
 
-        quiz = get_object_or_404(Quiz, id=id)
-        anonymous_user = None
+#         quiz = get_object_or_404(Quiz, id=id)
+#         anonymous_user = None
 
-        if not user.is_authenticated:
-            try:
-                anonymous_user = AnonymousUser.objects.get(anonymous_id=anonymous_id)
-                is_completed = anonymous_user.completed_quiz.filter(id=quiz.id).exists()
-            except AnonymousUser.DoesNotExist:
-                return Response({'data':{},'message':'Could not locate anonymous user with this ID'}, status=HTTP_404_NOT_FOUND)
-        else:
+#         if not user.is_authenticated:
+#             try:
+#                 anonymous_user = AnonymousUser.objects.get(anonymous_id=anonymous_id)
+#                 is_completed = anonymous_user.completed_quiz.filter(id=quiz.id).exists()
+#             except AnonymousUser.DoesNotExist:
+#                 return Response({'data':{},'message':'Could not locate anonymous user with this ID'}, status=HTTP_404_NOT_FOUND)
+#         else:
 
-            is_completed = False
+#             is_completed = False
 
-            student = get_object_or_404(StudentAccount, user=user)
-            quiz_tracker = AttemptedQuizOfUser.objects.filter(attempted_by=student, quiz=quiz).first()
+#             student = get_object_or_404(StudentAccount, user=user)
+#             quiz_tracker = AttemptedQuizOfUser.objects.filter(attempted_by=student, quiz=quiz).first()
 
-            if quiz_tracker: is_completed = quiz_tracker.is_completed
+#             if quiz_tracker: is_completed = quiz_tracker.is_completed
             
 
-        has_started = has_started_quiz(
-            anonymous_user = anonymous_user or None,
-            user=user,
-            quiz=quiz,
-            auth=user.is_authenticated
-        )
+#         has_started = has_started_quiz(
+#             anonymous_user = anonymous_user or None,
+#             user=user,
+#             quiz=quiz,
+#             auth=user.is_authenticated
+#         )
 
 
-        data = QuizSerializer(quiz, context={'has_user_started_quiz': has_started, 'is_completed': is_completed})
+#         data = QuizSerializer(quiz, context={'has_user_started_quiz': has_started, 'is_completed': is_completed})
 
-        return Response({'data':data.data, 'message':'OK'},status=HTTP_200_OK)
+#         return Response({'data':data.data, 'message':'OK'},status=HTTP_200_OK)
         
-    except Exception as e:
-        return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         return Response({'data':{},'message':str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(["POST"])
-@permission_classes([IsAuthenticated])
-def report_question(request):
-    try:
-        data = request.data
+# @api_view(["POST"])
+# @permission_classes([IsAuthenticated])
+# def report_question(request):
+#     try:
+#         data = request.data
 
-        quiz_id = data['quiz_id']
-        question_id = data['question_id']
-        issue = data['issue']
+#         quiz_id = data['quiz_id']
+#         question_id = data['question_id']
+#         issue = data['issue']
 
-        user:User = request.user
+#         user:User = request.user
 
-        try:
-            quiz = get_object_or_404(Quiz, id=quiz_id)
-            question = get_object_or_404(Question, id=question_id)
-        except Quiz.DoesNotExist or Question.DoesNotExist:
-            return Response({'data':{},'message':''}, status=HTTP_404_NOT_FOUND)
+#         try:
+#             quiz = get_object_or_404(Quiz, id=quiz_id)
+#             question = get_object_or_404(Question, id=question_id)
+#         except Quiz.DoesNotExist or Question.DoesNotExist:
+#             return Response({'data':{},'message':''}, status=HTTP_404_NOT_FOUND)
         
         
-        # Check if user has already reported this question
-        if QuizReports.objects.filter(quiz=quiz, question=question, user=user).exists():
-            return Response({'data':{},'message':'You already reported this Question'},status=HTTP_409_CONFLICT)
+#         # Check if user has already reported this question
+#         if QuizReports.objects.filter(quiz=quiz, question=question, user=user).exists():
+#             return Response({'data':{},'message':'You already reported this Question'},status=HTTP_409_CONFLICT)
 
         
-        report = QuizReports(
-            user=user,
-            quiz=quiz,
-            question=question,
-            issue=issue
-        )
+#         report = QuizReports(
+#             user=user,
+#             quiz=quiz,
+#             question=question,
+#             issue=issue
+#         )
 
-        report.save()
+#         report.save()
 
-        return Response({'data':{},"message":"This question has been reported"},status=HTTP_200_OK)
+#         return Response({'data':{},"message":"This question has been reported"},status=HTTP_200_OK)
 
 
-    except Exception as e:
-        return Response({'data':{},'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         return Response({'data':{},'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-@api_view(['GET'])
-@permission_classes([IsAuthenticated])
-def get_quiz_related_to_user(request):
-    try:
-        user: User = request.user
-        data = request.query_params
+# @api_view(['GET'])
+# @permission_classes([IsAuthenticated])
+# def get_quiz_related_to_user(request):
+#     try:
+#         user: User = request.user
+#         data = request.query_params
 
-        keyword = data.get('keyword', '')
+#         keyword = data.get('keyword', '')
 
-        # Check if the user is a tutor or student
-        try:
-            student = get_object_or_404(StudentAccount, user=user)
+#         # Check if the user is a tutor or student
+#         try:
+#             student = get_object_or_404(StudentAccount, user=user)
 
-            if not student: tutor = get_object_or_404(TeachersAccount, user=user)
+#             if not student: tutor = get_object_or_404(TeachersAccount, user=user)
 
-        except StudentAccount.DoesNotExist or TeachersAccount.DoesNotExist:
-            return Response({'data':{},'message':'Unable to locate user.'}, status=HTTP_404_NOT_FOUND)
+#         except StudentAccount.DoesNotExist or TeachersAccount.DoesNotExist:
+#             return Response({'data':{},'message':'Unable to locate user.'}, status=HTTP_404_NOT_FOUND)
         
-        # Find the quizzes related to this user i.e quiz attempted by the user
-        if student:
-            quizzes = AttemptedQuizOfUser.objects.filter(
-                Q(attempted_by=student) & Q(quiz__title__icontains=keyword)
-            ).values('quiz__id', 'quiz__title')[:7]
-            serializer = RelatedQuizSerializer(quizzes, many=True)
+#         # Find the quizzes related to this user i.e quiz attempted by the user
+#         if student:
+#             quizzes = AttemptedQuizOfUser.objects.filter(
+#                 Q(attempted_by=student) & Q(quiz__title__icontains=keyword)
+#             ).values('quiz__id', 'quiz__title')[:7]
+#             serializer = RelatedQuizSerializer(quizzes, many=True)
 
-        if not student and tutor:
-            quizzes = Quiz.objects.filter(
-                Q(host=user) & Q(title__icontains=keyword)
-            ).values('id', 'title')[:7]
-            serializer = RelatedQuizSerializerForTutor(quizzes, many=True)
+#         if not student and tutor:
+#             quizzes = Quiz.objects.filter(
+#                 Q(host=user) & Q(title__icontains=keyword)
+#             ).values('id', 'title')[:7]
+#             serializer = RelatedQuizSerializerForTutor(quizzes, many=True)
 
-        # Now i know i got similar data types i.e UUID and STR so send a response
-        return Response({'data':serializer.data,'message':'OK'},status=HTTP_200_OK)
+#         # Now i know i got similar data types i.e UUID and STR so send a response
+#         return Response({'data':serializer.data,'message':'OK'},status=HTTP_200_OK)
 
-    except Exception as e:
-        print(e)
-        return Response({'data':{},'message':str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         print(e)
+#         return Response({'data':{},'message':str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
 
 @permission_classes([IsAuthenticated])
 class NotificationApi(APIView):
@@ -1327,54 +770,54 @@ class NotificationApi(APIView):
 
         return Response({'data':{},',message':'OK'},status=HTTP_200_OK)
 
-@permission_classes([IsAuthenticated])
-class SavedQuizAPI(APIView):
- def get(self, request):
-    try:
-        quiz_id = request.query_params['quiz_id']
-        user:User = request.user
-        try:
-            quiz = get_object_or_404(Quiz, id=quiz_id)
-        except Quiz.DoesNotExist:
-            return Response({'data':{},"message":"Quiz Does not exists."},status=HTTP_404_NOT_FOUND)
+# @permission_classes([IsAuthenticated])
+# class SavedQuizAPI(APIView):
+#  def get(self, request):
+#     try:
+#         quiz_id = request.query_params['quiz_id']
+#         user:User = request.user
+#         try:
+#             quiz = get_object_or_404(Quiz, id=quiz_id)
+#         except Quiz.DoesNotExist:
+#             return Response({'data':{},"message":"Quiz Does not exists."},status=HTTP_404_NOT_FOUND)
         
-        is_saved = SavedQuiz.objects.filter(quiz=quiz, user=user).exists()
+#         is_saved = SavedQuiz.objects.filter(quiz=quiz, user=user).exists()
 
-        return Response({'data':{'is_saved': is_saved},"message":"OK"}, status=HTTP_200_OK)
+#         return Response({'data':{'is_saved': is_saved},"message":"OK"}, status=HTTP_200_OK)
 
-    except Exception as e:
-        return Response({'data':{},"message":str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         return Response({'data':{},"message":str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-# This Function Saved and Unsave
- def post(self, request):
-    try:
-        data = request.data
+# # This Function Saved and Unsave
+#  def post(self, request):
+#     try:
+#         data = request.data
 
-        user:User = request.user
-        quiz_id = data['quiz_id']
+#         user:User = request.user
+#         quiz_id = data['quiz_id']
 
-        try:
-            quiz = get_object_or_404(Quiz, id=quiz_id)
-        except Quiz.DoesNotExist:
-            return Response({'data':{},"message":"Quiz Does not exists."},status=HTTP_404_NOT_FOUND)
+#         try:
+#             quiz = get_object_or_404(Quiz, id=quiz_id)
+#         except Quiz.DoesNotExist:
+#             return Response({'data':{},"message":"Quiz Does not exists."},status=HTTP_404_NOT_FOUND)
         
 
 
-        saved_quiz, created = SavedQuiz.objects.get_or_create(quiz=quiz, user=user, defaults={
-            "quiz": quiz,
-            "user": user
-        })
+#         saved_quiz, created = SavedQuiz.objects.get_or_create(quiz=quiz, user=user, defaults={
+#             "quiz": quiz,
+#             "user": user
+#         })
 
-        if not created:
-            saved_quiz.delete()
+#         if not created:
+#             saved_quiz.delete()
 
-        message = "Quiz Saved" if created else "Quiz Removed From Saved"
+#         message = "Quiz Saved" if created else "Quiz Removed From Saved"
 
-        return Response({'data':{},"message":message},status=HTTP_200_OK)
+#         return Response({'data':{},"message":message},status=HTTP_200_OK)
 
-    except Exception as e:
-        print(e)
-        return Response({'data':{},"message": str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         print(e)
+#         return Response({'data':{},"message": str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
 @permission_classes([IsAuthenticated])
 class RatingsAPI(APIView):
@@ -1430,55 +873,55 @@ class RatingsAPI(APIView):
         except Exception as e:
             return Response({'data': {}, 'message': str(e)}, status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-@permission_classes([IsAuthenticated])
-class CommentAPI(APIView):
- def get(self, request):
-    try:
-        comment_id = request.query_params['comment_id']
-        user:User = request.user
-        try:
-            comment = get_object_or_404(Comments, id=comment_id)
-        except Quiz.DoesNotExist:
-            return Response({'data':{},"message":"Quiz Does not exists."},status=HTTP_404_NOT_FOUND)
+# @permission_classes([IsAuthenticated])
+# class CommentAPI(APIView):
+#  def get(self, request):
+#     try:
+#         comment_id = request.query_params['comment_id']
+#         user:User = request.user
+#         try:
+#             comment = get_object_or_404(Comments, id=comment_id)
+#         except Quiz.DoesNotExist:
+#             return Response({'data':{},"message":"Quiz Does not exists."},status=HTTP_404_NOT_FOUND)
         
-        is_liked = comment.likes.filter(id=user.id).exists()
+#         is_liked = comment.likes.filter(id=user.id).exists()
 
-        return Response({'data':{'is_liked': is_liked},"message":"OK"}, status=HTTP_200_OK)
+#         return Response({'data':{'is_liked': is_liked},"message":"OK"}, status=HTTP_200_OK)
 
-    except Exception as e:
-        return Response({'data':{},"message":str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         return Response({'data':{},"message":str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
-# This Function Like and unlike comment
- def post(self, request):
-    try:
-        data = request.data
+# # This Function Like and unlike comment
+#  def post(self, request):
+#     try:
+#         data = request.data
 
-        user:User = request.user
-        comment_id = data['comment_id']
+#         user:User = request.user
+#         comment_id = data['comment_id']
 
-        try:
-            comment = get_object_or_404(Comments, id=comment_id)
-        except Quiz.DoesNotExist:
-            return Response({'data':{},"message":"Quiz Does not exists."},status=HTTP_404_NOT_FOUND)
+#         try:
+#             comment = get_object_or_404(Comments, id=comment_id)
+#         except Quiz.DoesNotExist:
+#             return Response({'data':{},"message":"Quiz Does not exists."},status=HTTP_404_NOT_FOUND)
         
-        is_liked = comment.likes.filter(id=user.id).exists()
+#         is_liked = comment.likes.filter(id=user.id).exists()
 
-        if is_liked:
-            comment.likes.remove(user)
-            comment.save()
-        else:
-            comment.likes.add(user)
-            comment.save()
+#         if is_liked:
+#             comment.likes.remove(user)
+#             comment.save()
+#         else:
+#             comment.likes.add(user)
+#             comment.save()
 
-        message = ''
+#         message = ''
 
-        if is_liked: message = "Comment liked"
+#         if is_liked: message = "Comment liked"
 
-        return Response({'data':{},"message":message},status=HTTP_200_OK)
+#         return Response({'data':{},"message":message},status=HTTP_200_OK)
 
-    except Exception as e:
-        print(e)
-        return Response({'data':{},"message": str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
+#     except Exception as e:
+#         print(e)
+#         return Response({'data':{},"message": str(e)},status=HTTP_500_INTERNAL_SERVER_ERROR)
 
 @permission_classes([IsAuthenticated])
 class FeatureWaitListAPI(APIView):

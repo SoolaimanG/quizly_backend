@@ -3,17 +3,12 @@ import string
 from django.core.mail import EmailMessage
 from quizly_backend import settings
 from django.core.exceptions import ValidationError
-from difflib import SequenceMatcher
-from django.db.models import Q, Count
+from django.db.models import Q
 from math import ceil
 from django.utils import timezone
-from typing import Dict, Any, List
+from typing import Any, List
 from string import ascii_letters
     
-
-def string_mistakes(a, b):
-    return SequenceMatcher(None, a, b).ratio()
-
 def send_email(subject: str, body: str, recipients: List[str]):
     try:
         email = EmailMessage(
@@ -43,116 +38,7 @@ def generate_random_email() -> str:
 
 def generate_random_password(len: int):
     return "".join(random.choices(string.ascii_letters + string.ascii_uppercase + string.ascii_uppercase, k=len))
-
-def mark_question_by_type(user_answer: str | List[str], question: Any, quiz_tracker: Any):
-
-    
-    def add_xp():
-        quiz_tracker.XP += question.question_point
-        quiz_tracker.save()
         
-    def reduce_xp():
-        quiz_tracker.XP = max(quiz_tracker.XP - question.question_point, 0)
-        quiz_tracker.save()
-    
-    # Evaluate the user's answer
-    evaluation_result = evaluate_user_answer(question, user_answer,)
-
-    # Apply XP based on the evaluation result
-    if evaluation_result['is_correct']:
-        add_xp()
-    else:
-        reduce_xp()
-
-    # Update quiz tracker
-    quiz_tracker.questions_answered_by_student.add(question)
-    quiz_tracker.answers.append({'question': question.question_body, 'user_answer': user_answer, 'question_id': str(question.id)})
-    quiz_tracker.save()  # Save the update or record
-        
-def mark_quiz(question_id:str, user_answer:str, quiz_tracker:Any | Any, auth: bool):
-    from base.models import Question, Quiz
-    quiz = quiz_tracker.quiz
-    question = Question.objects.get(id=question_id)
-    
-    if quiz != question.quiz_id: #Making sure the id of the quiz pass is correct
-        raise ValueError('Question passed not matching with quiz id')
-    
-    #Get the question types
-    #question_type = question.question_type
-    
-    if auth:
-        try:
-    
-            #This means mark on going to next question
-            if quiz.result_display_type  == Quiz.ResultDisplayType.ON_COMPLETE or quiz.result_display_type == Quiz.ResultDisplayType.ON_SUBMIT:
-                mark_question_by_type(user_answer=user_answer,question=question, quiz_tracker=quiz_tracker)
-
-    
-            #Do not mark save for the teacher to come and mark
-            if quiz.result_display_type == Quiz.ResultDisplayType.MARK_BY_TEACHER:
-                quiz_tracker.answers.append({'question': question.question_body,'user_answer': user_answer, 'question_id': str(question.id)})
-                quiz_tracker.save()
-        except Exception as e:
-            raise ValueError(str(e))
-    else:
-        
-        mark_question_anonymous(
-            user_answer=user_answer,
-            quiz_tracker=quiz_tracker,
-            question=question
-        )
-        
-def get_next_question(quiz_id: str, size: int, auth: bool):
-    from base.models import Question
-    # Get all the questions of a particular quiz that the user hasn't answered yet
-    size = int(size) if auth else 5
-    
-    unanswered_questions = Question.objects.filter(quiz_id__id=quiz_id).values_list('id',flat=True)[:size]
-    
-    if not unanswered_questions:
-        raise ValueError('No questions left for you to answer')
-
-    return unanswered_questions
-
-def get_trending_quiz(size: int):
-    from base.models import Quiz
-    trending_quiz = Quiz.objects.annotate(participants_count=Count('participants')).order_by('-participants_count')[:size]
-    
-    
-    return trending_quiz
-
-def mark_as_completed(quiz_tracker: Any):
-    
-    quiz_tracker.is_completed = True
-    quiz_tracker.save()
-        
-    return quiz_tracker.is_completed
-
-def mark_question_anonymous(user_answer: str | List[str], question: Any, quiz_tracker: Any):
-    from base.models import AttemptedQuizByAnonymousUser
-    anonymous_user = quiz_tracker.attempted_by
-
-    # Evaluate the user's answer
-    evaluation_result = evaluate_user_answer(question=question, user_answer=user_answer)
-
-
-    # Save the quiz tracker with user answer
-    _ , created = AttemptedQuizByAnonymousUser.objects.get_or_create(
-        quiz=quiz_tracker.quiz,
-        question=question,
-        attempted_by=anonymous_user,
-        defaults={
-            'user_answer': user_answer,
-            'xp_earn': question.question_point if evaluation_result['is_correct'] else 0,
-        }
-    )
-
-    if not created and not quiz_tracker.user_answer:
-        _.user_answer = user_answer
-        _.xp_earn = question.question_point if evaluation_result['is_correct'] else 0
-        # Save the quiz tracker after updating user_answer
-        _.save()
-
 def has_started_quiz(auth: bool, anonymous_user: Any, user: Any, quiz: Any):
     from base.models import AttemptedQuizByAnonymousUser, StudentAccount, AttemptedQuizOfUser
     
@@ -173,7 +59,7 @@ def has_started_quiz(auth: bool, anonymous_user: Any, user: Any, quiz: Any):
             Q(quiz=quiz) & Q(attempted_by=anonymous_user)
             ).exists()
         
-def check_access_token(access_token: str, quiz: Any):
+# def check_access_token(access_token: str, quiz: Any):
     from base.models import QuizAccessToken
     if not all([access_token, quiz]):
         raise ValueError('Invalid access token')
@@ -198,7 +84,7 @@ def check_access_token(access_token: str, quiz: Any):
     
     return True
 
-def evaluate_user_answer(question: Any, user_answer: str) -> Dict[str, Any]:
+# def evaluate_user_answer(question: Any, user_answer: str) -> Dict[str, Any]:
     from base.models import ObjectiveOptions
     correct_options = ObjectiveOptions.objects.filter(
         belongs_to=question,
@@ -233,60 +119,11 @@ def evaluate_user_answer(question: Any, user_answer: str) -> Dict[str, Any]:
     result['explanation'] = question.correct_answer_explanation
     return result
 
-def check_quiz_type(quiz: Any, request: Any):
-    
-    user = request.user
-    
-    if quiz.allowed_users == quiz.ALLOWEDUSERS.AUTHENTICATED_USERS and not request.user.is_authenticated:
-        raise ValueError('Quiz is only available for authenticated users')
-    
-    if quiz.allowed_users == quiz.ALLOWEDUSERS.ONLY_MY_STUDENTS:
-        teacher = quiz.host
-        #The host of the quiz is the teacher and the student is the student
-        am_a_member = teacher.students.filter(user=user).exists()
-        
-        if not am_a_member:
-            raise ValueError('Quiz is only available for students of this tutor')
-
-def calculate_percentage_similarity(value1: int, value2: int) -> float:
-
-    return min(value1, value2) / max(value1, value2) * 100
-
-def give_user_feedback(user_xp: int, expected_xp: int) -> str:
-    if user_xp is None or expected_xp is None:
-        raise ValueError("Unable to determine feedback")
-
-    similarity_percentage = calculate_percentage_similarity(user_xp, expected_xp)
-
-    if similarity_percentage >= 90:
-        return "Excellent! You've exceeded the expected score."
-    elif similarity_percentage >= 70:
-        return "Great job! You've scored above the average."
-    elif similarity_percentage >= 50:
-        return "Good effort! You're almost at the average score."
-    else:
-        return "Poor performance. Keep practicing to improve."
-    
-def create_result_response_data(score_board, total_question):
-    # Construct data dictionary
-    data = {
-        'feedback': score_board.feedback,
-        'xp_earn': score_board.xp_earn,
-        'attempted_questions': score_board.attempted_question,
-        'start_time': score_board.start_time,
-        'end_time': score_board.end_time,
-        'wrong_answers': score_board.wrong_answers,
-        'corrections': score_board.corrections,
-        'total_questions': total_question,
-        'expected_xp': score_board.expected_xp
-    }
-
-    return data
 
 def upload_to(instance, filename):
     return 'images/{filename}'.format(filename=filename)
 
-def check_quiz_time(quiz: str, anonymous_id: str, user: Any):
+# def check_quiz_time(quiz: str, anonymous_id: str, user: Any):
     from .models import User, Quiz, AttemptedQuizOfUser, AttemptedQuizByAnonymousUser
     user: User
     quiz: Quiz

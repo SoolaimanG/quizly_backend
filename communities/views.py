@@ -13,7 +13,9 @@ from django.db.models import Q
 # from django.utils import timezone
 
 #Base Imports
-from .models import Community, User, Posts, Quiz, PostImages, PostComments
+from .models import Community, User, Posts, Quiz, PostImages, PostComments, Category
+from base.helpers import notification_helper
+from base.models import Notifications
 
 #Serializers Import
 from .serializers import PopularCommunitiesSerializer, CommunityDetailsSerializer, PostSerializer, MyCommunities, PostCommentSerializer
@@ -440,7 +442,6 @@ def community_action(request, post_id: str):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def create_community(request):
- from base.models import Category
  try:
   user: User = request.user
 
@@ -458,7 +459,7 @@ def create_community(request):
 
 
   image = image_uploader(display_picture) #Upload image to server -->Return a URL
-
+  
   community = Community(
    name=name,
    owner=user,
@@ -467,14 +468,12 @@ def create_community(request):
    display_picture = image
   )
 
+  community.save()
   # # Find the category and add it.
   categories = Category.objects.filter(body__in=allow_categories)
-  # community.save()
-  community.allow_categories.set(categories)
-  
+
   community.participants.add(user)
-  
-  community.save()
+  community.allow_categories.set(categories)
 
   return Response({'data':{},"message":'OK'},status=status.HTTP_200_OK)
  except Exception as e:
@@ -519,8 +518,6 @@ def search_community(request, id: str):
 @api_view(['POST'])
 @permission_classes([IsAuthenticated])
 def reject_or_accept_request(request, id: str):
-    from base.helpers import notification_helper
-    from base.models import Notifications
     try:
         data = request.data
         user: User = request.user

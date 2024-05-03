@@ -38,7 +38,8 @@ INSTALLED_APPS = [
 
     'base',
     'communities',
-    'surveys'
+    'surveys',
+    'quiz'
 ]
 
 REST_FRAMEWORK = {

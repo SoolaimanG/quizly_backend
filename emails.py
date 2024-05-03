@@ -56,6 +56,30 @@ def survey_invitation(link: str):
 
 """
 
+def report_emails(path:str):
+  return f"""
+  <!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Quiz/Question Report - Urgent Attention Required</title>
+</head>
+<body style="font-family: Arial, sans-serif; background-color: #f0f5f0; color: #333; padding: 20px; margin: 0;">
+<div style="max-width: 600px; margin: auto; background-color: #fff; padding: 20px; border-radius: 8px; box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);">
+  <div style="font-size: 16px; line-height: 1.6; margin-top: 30px;">
+    <h2 style="margin-top: 0;">Report Details</h2>
+    <p>Multiple users have reported encountering an issue with a quiz or question. To ensure a smooth user experience, we request you to investigate and address the reported problem as soon as possible.</p>
+  </div>
+  <a href={path} style="background-color: #006400; color: #fff; padding: 10px 20px; border: none; border-radius: 5px; cursor: pointer; text-align: center; text-decoration: none; display: inline-block; margin-top: 20px;">Take a Look</a>
+  <p style="font-size: 16px; line-height: 1.6; margin-top: 20px;">Please take immediate action to review and address the reported quiz or question. Thank you for your prompt attention to this concern.</p>
+  <p style="font-size: 16px; line-height: 1.6; margin-top: 10px;">Regards,</p>
+  <p style="font-size: 16px; line-height: 1.6;">Quizly</p>
+</div>
+</body>
+</html>
+
+"""
 
 def verify_email_address(link: str):
     return f"""

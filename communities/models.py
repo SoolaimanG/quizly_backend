@@ -1,6 +1,10 @@
+
+from typing import List
+
 from django.db import models
 # from base.models import User, Quiz, Category
-from base.models import User, Quiz, Category
+from base.models import User, Category
+from quiz.models import Quiz
 
 
 import uuid
@@ -98,6 +102,7 @@ class Community(DateTimeField):
   #notify_user_on_community()
   self.save()
  
+   
  def __str__(self):
   return self.name
  
