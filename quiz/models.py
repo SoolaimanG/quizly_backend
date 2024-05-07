@@ -5,6 +5,7 @@ from django.db import models
 from uuid import uuid4
 from datetime import datetime, timedelta
 import os
+from typing import List
 
 from base.models import User, StudentAccount, TeachersAccount
 
@@ -100,13 +101,6 @@ class Question(models.Model):
 
  #Perform this checks before adding question for teacher.
  def additional_checks(self):
-    quiz = Quiz.objects.get(id=self.quiz_id.id)
-
-    # # Find all the related questions 
-    questions = Question.objects.filter(quiz_id__id=self.quiz_id.id).count()
-
-    if self.question_number == 0 : self.question_number = questions + 1 #Automatically count the numbers of question to show to users
-
     # Check if the question is a boolean question and if its strict
     if(
        self.question_type == self.QuestionTypes.TRUE_OR_FALSE and self.mistakes_to_ignore > 0
@@ -115,11 +109,14 @@ class Question(models.Model):
 
     # If the quiz if mark on check then make sure the answers and correct answer explanation is set
     if( 
-       quiz.result_display_type == quiz.ResultDisplayType.ON_COMPLETE and self.question_type == self.QuestionTypes.GERMAN and not self.answer
+       self.quiz.result_display_type == self.quiz.ResultDisplayType.ON_COMPLETE and self.question_type == self.QuestionTypes.OPEN_ENDED and not self.answer
     ):
        raise ValueError('Provide answer for this question.')
 
-
+ def calculate_expected_xp(self):
+     expected_xp = Question.objects.filter(quiz=self.quiz).aggregate(expected_exp=models.Sum('question_point')).values('expected_xp') or 0
+     self.quiz.expected_xp = expected_xp
+     self.quiz.save()
 
  def save(self, *arg, **kwarg):
     self.additional_checks()
@@ -153,8 +150,11 @@ class MultipleChoiceOption(models.Model):
     image_url = models.URLField(null=True, blank=True)
     question = models.ForeignKey(Question,on_delete=models.CASCADE) 
  
+    created_at = models.DateTimeField(auto_now=True)
+    updated_at = models.DateTimeField(auto_now_add=True, null=True, blank=True)
+    
     def __str__(self):
-        return self.belongs_to.quiz_id.title
+        return self.question.quiz.title
     
 class QuizzesAttemptedByUser(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid4)
@@ -173,7 +173,7 @@ class QuizzesAttemptedByUser(models.Model):
     
     
     def __str__(self):
-        return f"{self.attempted_by.user.username} attempted {self.quiz.title}"
+        return f"{self.student.user.username} attempted {self.quiz.title}"
 
 class UserAnswerForQuestion(models.Model):
     quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE)
@@ -183,14 +183,13 @@ class UserAnswerForQuestion(models.Model):
     
     
     def __str__(self) -> str:
-       return self.response[:100]
+       return str(self.user_id)
 
 class AnonymousUser(models.Model):
     anonymous_id = models.UUIDField(default=uuid4, primary_key=True)
     xp = models.PositiveIntegerField(default=10)
     completed_quiz = models.ManyToManyField(Quiz, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
-    ip_address = models.GenericIPAddressField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now=True)
     
     # This provides a link between anonymous user and authenticated user
     def link_anonymous_user_to_authenticated_user(self, user:User, quiz: Quiz):
@@ -204,7 +203,7 @@ class AnonymousUser(models.Model):
             student.xp=+self.xp
             student.save()
         
-        quizzes:BaseManager[Quiz] = self.completed_quiz
+        quizzes: List[Quiz] = self.completed_quiz
         attempted_questions_ids = AttemptedQuizByAnonymousUser.objects.filter(quiz__id=quiz.id, anonymous_user=self).values_list('question__id', flat=True)
         questions = Question.objects.filter(quiz=quiz).all()
         questions_completed = questions.filter(id__in=attempted_questions_ids).all()
@@ -231,24 +230,15 @@ class AnonymousUser(models.Model):
 
 class AttemptedQuizByAnonymousUser(models.Model):
     quiz = models.ForeignKey(Quiz, on_delete=models.CASCADE)
-    questions_attempted = models.ManyToManyField(Question)
+    questions_attempted = models.ManyToManyField(Question, null=True, blank=True)
     is_completed = models.BooleanField(default=False)
     user_answer = models.CharField(max_length=300, null=True, blank=True)
     anonymous_user = models.ForeignKey(AnonymousUser, on_delete=models.CASCADE)
     xp_earn = models.PositiveIntegerField(default=0)
     
     end_time = models.DateTimeField(null=True, blank=True)
-    start_time = models.DateTimeField(auto_now_add=True)
+    start_time = models.DateTimeField(auto_now=True)
 
-    def prevent_duplicate(self):
-        if AttemptedQuizByAnonymousUser.objects.filter(
-            Q(question=self.question) & Q(anonymous_user=self.anonymous_user) & Q(quiz=self.quiz)
-        ).count() > 1:
-            raise ValidationError('Duplicate question for user found')
-
-    def save(self, *args, **kwargs):
-        self.prevent_duplicate()
-        super().save(*args, **kwargs)
 
     def __str__(self):
         return self.quiz.title
@@ -320,8 +310,11 @@ class ReportsOnQuiz(models.Model):
     question = models.ForeignKey(Question, on_delete=models.CASCADE)
    
     notification_sent_to_host = models.DateTimeField(null=True, blank=True)
-    created_at = models.DateTimeField(auto_now_add=True)
+    created_at = models.DateTimeField(auto_now=True)
    
+    def check_if_user_has_reported_already(self):
+        if ReportsOnQuiz.objects.filter(user=self.user, quiz=self.quiz, question=self.question).exists():
+            raise ValueError('Thank you for letting us know there is an issue with this question. We will notify the host of this quiz immediately')
    # Notify the host if the issue has persist
     def notify_host_on_issue(self):
         all_participants = QuizzesAttemptedByUser.objects.filter(quiz=self.quiz).count()
@@ -362,6 +355,7 @@ class ReportsOnQuiz(models.Model):
                         raise ValueError(e)
     
     def save(self, *arg, **kwarg):
+        self.check_if_user_has_reported_already()
         self.notify_host_on_issue()
         super().save(*arg, **kwarg)
 

@@ -9,7 +9,7 @@ from rest_framework import status
 from ipware import get_client_ip
 
 from base.models import User, StudentAccount
-from .models import Quiz, QuizComments, Question, QuizScoreBoard, AttemptedQuizByAnonymousUser, QuizzesAttemptedByUser
+from .models import Quiz, QuizComments, Question, QuizScoreBoard, AttemptedQuizByAnonymousUser, QuizzesAttemptedByUser, ReportsOnQuiz
 
 from serializers import UUIDListSerializer
 
@@ -65,7 +65,7 @@ def start_quiz(request, quiz_id:str):
         
         
         # This will check if the current user is eligible to participate in the quiz
-        check_if_user_can_participate(quiz, request)
+        check_if_user_can_participate(quiz, request, data)
         
         # If user is eligible this will handle their participation like creating a tracker for user.
         handle_user_participation(user, anonymous_id, ip_address, quiz)
@@ -107,15 +107,17 @@ def get_quiz_questions_api(request, quiz_id:str):
 def mark_user_question_as_answered(request, question_id: str):
     try:
         
+        data = request.data
+        
         question = get_object_or_404(Question, id=question_id)
         quiz = get_object_or_404(Quiz, id=question.quiz.id)
-        
-        check_if_user_can_participate(quiz, request)
-        
-        tracker = verify_user_participation(quiz, request)
-        
+
+        check_if_user_can_participate(quiz, request, data)
+
+        tracker = verify_user_participation(quiz, request, data)
+
         # This marks user answer if the quiz is on complete or on submit
-        result = save_user_response(quiz, request, question, tracker)
+        result = save_user_response(quiz, data, question, tracker, request.user)
         
         if quiz.result_display_type != quiz.ResultDisplayType.ON_COMPLETE:
             result['is_correct'] = None
@@ -133,6 +135,7 @@ def mark_user_question_as_answered(request, question_id: str):
 def get_quick_quiz_for_user(request):
     try:
         user: User = request.user
+        anonymous_id = request.query_params.get('anonymous_id', "")
         
         two_minutes_ago = timezone.now() - timedelta(minutes=2)
         
@@ -142,14 +145,14 @@ def get_quick_quiz_for_user(request):
             return Response({'data':{'error': 'quick-quiz-cool-off'}, 'message':'Please take a brief pause. We will be ready for you again shortly.'}, status=status.HTTP_425_TOO_EARLY)
         
         if tracker and not tracker.is_completed:
-            data = QuizSerializer(tracker.quiz)
+            data = QuizSerializer(tracker.quiz, context={'user': user, 'anonymous_id': anonymous_id})
             return Response({'data':data.data,'message':''}, status=status.HTTP_200_OK)
         
         quiz = get_a_quick_quiz_for_user(user)
         
-        data = QuizSerializer(quiz)
+        data = QuizSerializer(quiz, context={'user':user,'anonymous_id': anonymous_id})
         
-        return Response({'data':data.data,'message':'OK'}, status=status.HTTP_200_OK)
+        return Response({'data': data.data,'message':'OK'}, status=status.HTTP_200_OK)
         
         # First get a quiz that user has not attempted
     except Exception as e:
@@ -160,16 +163,17 @@ class QuestionAPI(APIView):
     def get(self, request, question_id:str):
         try:
             
+            data = request.query_params
             question = get_object_or_404(Question, id=question_id)
             
             quiz:Quiz = get_object_or_404(Quiz, id=question.quiz.id)
             
             # Include access token if its required
-            check_if_user_can_participate(quiz, request)
+            check_if_user_can_participate(quiz, request, data)
             
-            verify_user_participation(quiz, request)
+            verify_user_participation(quiz, request, data)
             
-            data = QuestionSerializer(question)
+            data = QuestionSerializer(question, context={'user': request.user, 'anonymous_id': data.get('anonymous_id', "")})
             
             return Response({'data':data.data, 'message':''}, status=status.HTTP_200_OK)
         except Exception as e:
@@ -215,14 +219,11 @@ class QuizAPI(APIView):
     def get(self, request, quiz_id: str):
         try:
             user: User = request.user
-            quiz = cache.get(f'quiz_{quiz_id}')
+            anonymous_id = request.query_params.get('anonymous_id', '')
             
-            if quiz:
-                data = QuizSerializer(quiz)
-                return Response({'data':data.data, 'message':'OK'}, status=status.HTTP_200_OK)
             
             quiz = get_object_or_404(Quiz, id=quiz_id)
-            data = QuizSerializer(quiz, context={'user': user, 'anonymous_id': request.query_params.get('anonymous_id', '')})
+            data = QuizSerializer(quiz, context={'user': user, 'anonymous_id': anonymous_id})
             
             # Setting the cache
             cache.delete(f"quiz_{quiz_id}")
@@ -240,11 +241,10 @@ class QuizResult(APIView):
         try:
             user: User = request.user
             data = request.query_params
-            # ip_address = data.get('ip_address', get_client_ip(request)[0])
             
             quiz = get_object_or_404(Quiz, id=quiz_id)
             
-            tracker = verify_user_participation(quiz, request)
+            tracker = verify_user_participation(quiz, request, data)
             
             if not tracker.is_completed:
                 return Response({'data':{'error':'quiz-is-not-submitted'},'message': 'Something went wrong: You participated in this quiz but it looks like you have not submitted this quiz'}, status=status.HTTP_)
@@ -259,7 +259,6 @@ class QuizResult(APIView):
             if user.is_anonymous:
                 tracker = get_object_or_404(AttemptedQuizByAnonymousUser, anonymous_user__anonymous_id=data['anonymous_id'], quiz=quiz)
                 data = handle_quiz_submission(tracker, user)
-                
                 return Response({'data':data,'message': 'OK'}, status=status.HTTP_200_OK)
             
         except Quiz.DoesNotExist as e:
@@ -272,19 +271,15 @@ class QuizResult(APIView):
             data = request.data 
             user:User = request.user
             
-            ip_address = data.get('ip_address', get_client_ip(request)[0])
-            
             quiz = get_object_or_404(Quiz, id=quiz_id)
             
-            handle_user_participation(user, data['anonymous_id'], ip_address )
-            
-            tracker =  verify_user_participation(quiz, request)
+            tracker =  verify_user_participation(quiz, request, data)
             
             # Get all the questions user answer
             data = handle_quiz_submission(tracker, user)
             
-            
-            score_board = QuizScoreBoard(
+            if user.is_authenticated:
+                score_board = QuizScoreBoard(
                 user=tracker.student,
                 quiz=tracker.quiz,
                 corrections=data['corrections'],
@@ -294,9 +289,9 @@ class QuizResult(APIView):
                 expected_xp='',
                 start_time=tracker.start_time,
                 end_time=tracker.end_time
-            )
-            
-            if user.is_authenticated: score_board.save()
+                )
+                # Save the obj in DB
+                score_board.save()
             
             mark_quiz_as_completed(tracker)
             
@@ -307,6 +302,32 @@ class QuizResult(APIView):
         except Exception as e:
             return Response({'data':{},'message': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+class ReportQuestionAndQuiz(APIView):
+    def post(self, request, question_id: str):
+        try:
+            
+            data = request.data
+            user:User = request.user
+            
+            question = get_object_or_404(Question, id=question_id)
+            
+            verify_user_participation(question.quiz, request, data)
+            
+            report = ReportsOnQuiz(
+                user=user,
+                report=data['report'],
+                quiz=question.quiz,
+                question=question
+            )
+            
+            report.save()
+            
+            return Response({'data':{},'message':'OK'}, status=status.HTTP_200_OK)
+            
+        except Question.DoesNotExist as e:
+            return Response({'data':{},'message': str(e)}, status=status.HTTP_404_NOT_FOUND)
+        except Exception as e:
+            raise e
 
 
 

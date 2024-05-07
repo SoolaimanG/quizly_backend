@@ -1,6 +1,8 @@
 
 from .models import Quiz, QuizAccessToken, StudentAccount, QuizzesAttemptedByUser, AnonymousUser, Question, AttemptedQuizByAnonymousUser, UserAnswerForQuestion, MultipleChoiceOption
 from typing import Any, List
+from itertools import zip_longest
+from math import ceil
 
 from base.models import User
 
@@ -10,6 +12,14 @@ from django.shortcuts import get_object_or_404
 
 
 # ---------Functions Starts Here
+
+def string_difference(str1, str2):
+  # Handle the case where one string is longer than the other
+    difference = sum(c1 != c2 for c1, c2 in zip(str1, str2))
+    difference += len(str1) - len(str2) if len(str1) > len(str2) else len(str2) - len(str1)
+    
+    return difference
+
 def check_access_token(token: str, quiz: Quiz, user: User):
     """
     The function `check_access_token` verifies the validity and expiration of an access token for a quiz
@@ -57,7 +67,7 @@ def get_trending_quiz(size: int | str):
     """
     return Quiz.objects.order_by('-rating', '-participants')[:size]
 
-def check_if_user_can_participate(quiz: Quiz, request: Any):
+def check_if_user_can_participate(quiz: Quiz, request: Any, data: Any):
     """
     The function `check_quiz_type` verifies the access and user permissions for a quiz based on the
     provided request data.
@@ -72,7 +82,6 @@ def check_if_user_can_participate(quiz: Quiz, request: Any):
     """
     
     user:User = request.user
-    data = request.data
     
     if quiz.access_with_key: check_access_token(
         token=data['access_token'],
@@ -106,17 +115,18 @@ def participate_as_authenticated_user(user: User, quiz: Quiz):
     if tracker[0].is_completed:
         raise ValueError('User has already completed this quiz')
     
-def participate_quiz_as_anonymous_user(anonymous_id: str, ip_address: str, quiz: Quiz):
-    anonymous_user, _ = AnonymousUser.objects.get_or_create(anonymous_id=anonymous_id, defaults={
-        'ip_address': ip_address,
-        'anonymous_id':anonymous_id
+def participate_quiz_as_anonymous_user(anonymous_id: str, quiz: Quiz):
+    anonymous_user = AnonymousUser.objects.get_or_create(anonymous_id=anonymous_id, defaults={
+        'anonymous_id': anonymous_id,
+        'xp': 0
     })
     
-    tracker = AttemptedQuizByAnonymousUser.objects.get_or_create(quiz=quiz,anonymous_user=anonymous_user, defaults={
+    tracker = AttemptedQuizByAnonymousUser.objects.get_or_create(quiz=quiz, anonymous_user=anonymous_user[0], defaults={
         'quiz': quiz,
-        'anonymous_user': anonymous_user
+        'anonymous_user': anonymous_user[0]
     })
     
+    print(tracker)
     if tracker[0].is_completed:
         raise ValueError({'error':'quiz-completed'})
     
@@ -124,10 +134,8 @@ def get_quiz_questions(quiz: Quiz, request: Any):
     user:User = request.user
     
     size = 10 if user.is_anonymous else None
-    
-    questions = Question.objects.filter(quiz=quiz).all().values_list('id', flat=True)[:size]
 
-    return questions
+    return Question.objects.filter(quiz=quiz).all().values_list('id', flat=True)[:size]
 
 def get_unanswered_questions(quiz: Quiz, request: Any):
     """
@@ -148,17 +156,11 @@ def get_unanswered_questions(quiz: Quiz, request: Any):
     """
     
     user:User = request.user
-    questions = []
     
-    if user.is_authenticated:
-        questions_attempted = get_object_or_404(QuizzesAttemptedByUser, quiz=quiz, student__user=user).questions_attempted.all().values_list('id', flat=True)
-        questions = Question.objects.filter(quiz=quiz).exclude(id__in=questions_attempted).values_list('id', flat=True)
+    questions_attempted = QuizzesAttemptedByUser.objects.filter(quiz=quiz).values_list('questions__id', flat=True) if user.is_authenticated else AttemptedQuizByAnonymousUser.objects.filter(quiz=quiz).values_list('questions__id', flat=True)
         
-    if user.is_anonymous:
-            questions_attempted = AttemptedQuizByAnonymousUser.objects.filter(quiz=quiz).values_list('question__id', flat=True)
-            questions = Question.objects.filter(quiz=quiz).exclude(id__in=questions_attempted).values_list('id', flat=True)
+    return Question.objects.filter(quiz=quiz).exclude(id__in=questions_attempted).values_list('id', flat=True)
         
-    return questions
         
 def handle_user_participation(user: User, anonymous_id: str, ip_address: str, quiz: Quiz):
     """
@@ -180,10 +182,10 @@ def handle_user_participation(user: User, anonymous_id: str, ip_address: str, qu
     :type quiz: Quiz
     """
     if user.is_authenticated:
-        participate_as_authenticated_user(user=user)
+        participate_as_authenticated_user(user, quiz)
         
     if user.is_anonymous:
-        participate_quiz_as_anonymous_user(anonymous_id=anonymous_id, ip_address=ip_address[0], quiz=quiz) 
+        participate_quiz_as_anonymous_user(anonymous_id=anonymous_id, quiz=quiz) 
 
 def handle_timer_check_for_authenticated_and_unauthenticated_users(quiz:Quiz, tracker: QuizzesAttemptedByUser | AttemptedQuizByAnonymousUser):
     """
@@ -209,17 +211,17 @@ def handle_timer_check_for_authenticated_and_unauthenticated_users(quiz:Quiz, tr
     
     return time_remaining
 
-def verify_user_participation(quiz: Quiz, request: Any):
+def verify_user_participation(quiz: Quiz, request: Any, data: Any):
     user:User = request.user
     
     if user.is_authenticated:
         tracker = get_object_or_404(QuizzesAttemptedByUser, quiz=quiz, student__user=user)
         
+    if user.is_anonymous:
+        tracker = get_object_or_404(AttemptedQuizByAnonymousUser, quiz=quiz, anonymous_user__anonymous_id=data['anonymous_id'])
+    
     if not quiz.is_published:
         raise ValueError('Something went wrong: This often happens if the quiz is not yet published')
-    
-    if user.is_anonymous:
-        tracker = get_object_or_404(AttemptedQuizByAnonymousUser, quiz=quiz, anonymous_user__anonymous_id=request.data['anonymous_id'])
     
     return tracker
     
@@ -252,11 +254,12 @@ def handle_quiz_timer(quiz:Quiz, tracker: QuizzesAttemptedByUser | AttemptedQuiz
     return time_remaining
 
 # MAIN FUNCTION THAT CONTROLS MARKING USER ANSWER
-def save_user_response(quiz:Quiz, request: Any, question:Question, tracker: QuizzesAttemptedByUser | AttemptedQuizByAnonymousUser):
-    user:User = request.user
-    user_answer = request.data['user_answer']
-    
-    question_has_been_attempted = tracker.questions_attempted.get(question=question)
+def save_user_response(quiz:Quiz, data: Any, question:Question, tracker: QuizzesAttemptedByUser | AttemptedQuizByAnonymousUser, user:User):
+    user_answer = data['user_answer']
+
+    question_has_been_attempted = tracker.questions_attempted.filter(id=question.id).exists()
+
+    print(question_has_been_attempted)
     
     # If user has already answer the question do not allow to re-do the question if the type is ON-COMPLETE
     if question_has_been_attempted and quiz.result_display_type == quiz.ResultDisplayType.ON_COMPLETE:
@@ -265,12 +268,15 @@ def save_user_response(quiz:Quiz, request: Any, question:Question, tracker: Quiz
     handle_quiz_timer(quiz, tracker)
     
     result = assign_point_to_user(user_answer, tracker, question)
-
-    user_response, created = UserAnswerForQuestion.objects.get_or_create(question=question, user=user, defaults={
+    
+    user_id = user.id if user.is_authenticated else tracker.anonymous_user.anonymous_id
+    
+    user_response, created = UserAnswerForQuestion.objects.get_or_create(question=question, user_id=user_id, quiz=tracker.quiz, defaults={
         'question': question,
-        'user': user.id or tracker.anonymous_user.anonymous_id,
-        'answer': user_answer
-    })
+        'user_id': user_id,
+        'answer': list(user_answer),
+        'quiz': tracker.quiz
+    }) 
     
     if not created:
         user_response.answer = user_answer
@@ -278,15 +284,15 @@ def save_user_response(quiz:Quiz, request: Any, question:Question, tracker: Quiz
         
     return result
     
-def evaluate_user_response(question: Question, user_answer: str):
+def evaluate_user_response(question: Question, user_answer: List[str]):
     
     result = {'is_correct': False, 'question_explanation': '', 'correct_answer':[]}
     
-    if question.QuestionTypes.MULTIPLE_CHOICES == question.question_type and question.QuestionTypes.OBJECTIVE == question.question_type:
+    if question.QuestionTypes.MULTIPLE_CHOICES == question.question_type or question.QuestionTypes.OBJECTIVE == question.question_type:
         result = evaluate_multiple_choice_question(question, user_answer)
           
     if question.QuestionTypes.TRUE_OR_FALSE == question.question_type:
-        result = evaluate_true_or_false_question()
+        result = evaluate_true_or_false_question(question, [user_answer])
     
     if question.QuestionTypes.OPEN_ENDED == question.question_type:
         result = evaluate_open_end_question(question, user_answer)
@@ -297,10 +303,10 @@ def evaluate_multiple_choice_question(question: Question, user_answer: List[str]
     
     result = {'is_correct': False, 'question_explanation': '', 'correct_answer':[]}
     
-    correct_answers = MultipleChoiceOption.objects.filter(question=question, is_correct=True).values_list('body', flat=True)
+    correct_answers = MultipleChoiceOption.objects.filter(question=question, is_correct_answer=True).values_list('body', flat=True)
     result['is_correct'] = all(answer in user_answer for answer in correct_answers)
     result['correct_answer'] = list(correct_answers)
-    result['question_explanation'] = ', '.join(correct_answers)
+    result['question_explanation'] = question.correct_answer_explanation
     
     return result
 
@@ -309,26 +315,27 @@ def evaluate_open_end_question(question: Question, user_answer: List[str]):
     result = {'is_correct': False, 'question_explanation': '', 'correct_answer':[]}
     
     correct_answer = question.answer.lower().strip()
-    user_answer = str(user_answer).lower().strip()
+    user_response = str(user_answer[0]).lower().strip()
+
     mistakes_to_ignore = question.mistakes_to_ignore
-    if mistakes_to_ignore is not None:
-        mistakes_count = sum(1 for a, b in zip(correct_answer, user_answer) if a != b)
-        result['is_correct'] = mistakes_count <= mistakes_to_ignore
+    if bool(mistakes_to_ignore):
+        mistakes_ratio = string_difference(user_response, correct_answer) * mistakes_to_ignore
+        result['is_correct'] = mistakes_ratio <= mistakes_to_ignore
     else:
-        result['is_correct'] = correct_answer == user_answer
+        result['is_correct'] = correct_answer == user_response
         
     result['question_explanation'] = question.correct_answer_explanation
     result['correct_answer'] = question.answer
         
     return result
 
-def evaluate_true_or_false_question(question: Question, user_answer: List[str]):
+def evaluate_true_or_false_question(question: Question, user_answer: List[str]): 
     
     result = {'is_correct': False, 'question_explanation': '', 'correct_answer':[]}
     
-    correct_answer = str(question.answer_is_true).lower()
+    correct_answer = question.true_or_false
     result['correct_answer'] = correct_answer
-    result['is_correct'] = correct_answer == str(user_answer).lower()
+    result['is_correct'] = all([correct_answer, user_answer[0]])
     result['question_explanation'] = question.correct_answer_explanation
     
     return result
@@ -337,34 +344,41 @@ def assign_point_to_user(user_answer: List[str], tracker: QuizzesAttemptedByUser
     
     def add_xp():
         tracker.xp_earn += question.question_point
+        tracker.save()
     
     def reduce_xp():
         tracker.xp_earn = 0 if tracker.xp_earn - question.incorrect_answer_penalty <= 0 else tracker.xp_earn - question.incorrect_answer_penalty
+        tracker.save()
     
     result = evaluate_user_response(question, user_answer)
-    
+    print(result)
     add_xp() if result['is_correct'] else reduce_xp()
 
     # Add question to the one answered by the user
     tracker.questions_attempted.add(question)
-    tracker.save()
     
     return result
 
 def handle_quiz_submission(tracker: QuizzesAttemptedByUser | AttemptedQuizByAnonymousUser, user: User):
-    user_id = user.id if user.is_anonymous else tracker.anonymous_user.anonymous_id
-    user_answers = UserAnswerForQuestion.objects.filter(quiz=tracker.quiz, user_id=user_id).values_list('answer', flat=True)
+    
+    user_id = user.id if user.is_authenticated else tracker.anonymous_user.anonymous_id
+    user_answers: List[str] = UserAnswerForQuestion.objects.filter(quiz=tracker.quiz, user_id=user_id).values_list('answer', flat=True)
     questions = Question.objects.filter(quiz=tracker.quiz).all()
     
     
-    data = {'wrong_answers': 0, 'corrections': [], 'xp_earn': tracker.xp_earn, 'start_time': tracker.start_time, 'questions_attempted': user_answers.count(), 'feedback': give_user_feedback(tracker.xp_earn, 10), 'questions_answered': user_answers.count()}
+    data = {'wrong_answers': 0, 'corrections': [], 'xp_earn': tracker.xp_earn, 'start_time': tracker.start_time,'end_time': tracker.end_time or timezone.now(), 'questions_attempted': user_answers.count(), 'feedback': give_user_feedback(tracker.xp_earn, tracker.quiz.expected_xp or 10), 'total_questions': questions.count(), 'expected_xp': tracker.quiz.expected_xp}
     
-    for question, user_answer in zip(questions, user_answers):
+    for question, user_answer in zip_longest(questions, user_answers, fillvalue=['']):
         result = evaluate_user_response(question, user_answer)
         
         if not result['is_correct']:
+            correct_answer = {
+                'question': question.question_body,
+                'answer': question.answer,
+                'explanation': question.correct_answer_explanation
+            }
             data['wrong_answers'] += 1
-            data['corrections'].append(question.question.correct_answer_explanation)
+            data['corrections'].append(correct_answer)
             
     return data
 
@@ -433,7 +447,7 @@ def get_a_quick_quiz_for_user(user:User):
 
 
 
-
+# TODO: Create a cron Job to submit quizzes that user leave un-submitted.
 
 
 

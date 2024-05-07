@@ -11,5 +11,7 @@ urlpatterns = [
     path('quiz-comments/<str:quiz_id>/', views.QuizCommentsAPI.as_view()),
     path('quiz-result/<str:quiz_id>/', views.QuizResult.as_view()),
     path('quiz-questions/<str:quiz_id>/', views.get_quiz_questions_api),
-    path('quick-quiz/', views.get_quick_quiz_for_user)
+    path('quick-quiz/', views.get_quick_quiz_for_user),
+    path('mark-question/<str:question_id>/', views.mark_user_question_as_answered),
+    path('report-question/<str:question_id>/', views.ReportQuestionAndQuiz.as_view())
 ]

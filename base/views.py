@@ -1,12 +1,10 @@
 from datetime import timedelta
-from typing import List
 
 from dotenv import load_dotenv
 load_dotenv()
 
 import os
 import uuid
-import requests
 
 from .models import User, ForgetPassword, EmailVerification, StudentAccount, TeachersAccount,Category, Notifications, FeatureWaitList
 from rest_framework.response import Response
@@ -19,16 +17,12 @@ from django.contrib.auth import password_validation
 from django.contrib.auth.hashers import make_password
 from rest_framework_simplejwt.tokens import RefreshToken
 from rest_framework.status import HTTP_200_OK, HTTP_404_NOT_FOUND, HTTP_500_INTERNAL_SERVER_ERROR,HTTP_400_BAD_REQUEST, HTTP_429_TOO_MANY_REQUESTS,HTTP_409_CONFLICT
-from .helpers import generate_otp,send_email, generate_random_email,generate_random_password, has_started_quiz, notification_helper
+from .helpers import generate_otp,send_email, generate_random_email,generate_random_password, notification_helper
 from emails import otp_message, verify_email_address
 from serializers import UserSerializer, CategorySerializer, NotificationSerializer, TeachersAccountSerializer, StudentAccountSerializer
 from django.utils.decorators import method_decorator
 from django.views.decorators.cache import cache_page
-# from django.core.exceptions import ObjectDoesNotExist
-# from django.db import models
 from django.db.models import Q
-# from ipware import get_client_ip
-# from django.db import transaction
 
 from helpers import image_uploader
 
